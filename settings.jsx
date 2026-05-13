@@ -138,7 +138,7 @@ function SettingsView({ lang, setLang, theme, setTheme, density, setDensity, tea
   const [editingId, setEditingId] = useStateS(null);
   const [editForm, setEditForm] = useStateS({});
   const [creating, setCreating] = useStateS(false);
-  const [newForm, setNewForm] = useStateS({ name: "", dept: "", role: "Editor", hue: 200 });
+  const [newForm, setNewForm] = useStateS({ name: "", dept: "", role: "in_house", hue: 200 });
 
   /* ── Tags ── */
   const [tagEditingId, setTagEditingId] = useStateS(null);
@@ -440,8 +440,8 @@ function SettingsView({ lang, setLang, theme, setTheme, density, setDensity, tea
     const name = newForm.name.trim();
     const parts = name.split(" ");
     const initials = parts.length >= 2 ? (parts[0][0] + parts[parts.length - 1][0]).toUpperCase() : name.slice(0, 2).toUpperCase();
-    onSaveTeamMember?.({ id: "u-" + Math.random().toString(36).slice(2, 8), name, initials, dept: newForm.dept.trim(), role: newForm.role, hue: newForm.hue });
-    setNewForm({ name: "", dept: "", role: "Editor", hue: 200 });
+    onSaveTeamMember?.({ id: "u-" + Math.random().toString(36).slice(2, 8), name, initials, dept: newForm.dept.trim(), role: "in_house", hue: newForm.hue });
+    setNewForm({ name: "", dept: "", role: "in_house", hue: 200 });
     setCreating(false);
   }
 
@@ -1064,13 +1064,19 @@ function SettingsView({ lang, setLang, theme, setTheme, density, setDensity, tea
         </div>
       </section>
 
-      {/* ══ 4 · Team / Mitglieder ═══════════════════════════════════════════ */}
+      {/* ══ 4 · Urheber ══════════════════════════════════════════════════════ */}
       <section>
-        <SectionLabel>{lang === "de" ? "Team & Mitglieder" : "Team & members"}</SectionLabel>
+        <SectionLabel>{lang === "de" ? "Urheber" : "Authors"}</SectionLabel>
+
+        <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 16, lineHeight: 1.6 }}>
+          {lang === "de"
+            ? "Urheber werden beim Upload und in der Bildverwaltung als Rechteinhaber zugewiesen."
+            : "Authors are assigned as rights holders during upload and in asset management."}
+        </div>
 
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
           <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--muted)" }}>
-            {team.length} {lang === "de" ? "Personen" : "people"}
+            {team.length} {lang === "de" ? (team.length === 1 ? "Urheber" : "Urheber") : (team.length === 1 ? "author" : "authors")}
           </div>
           <button
             onClick={() => { setCreating(v => !v); setEditingId(null); }}
@@ -1081,7 +1087,7 @@ function SettingsView({ lang, setLang, theme, setTheme, density, setDensity, tea
             }}
           >
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M12 5v14M5 12h14"/></svg>
-            {lang === "de" ? "Mitglied hinzufügen" : "Add member"}
+            {lang === "de" ? "Urheber hinzufügen" : "Add author"}
           </button>
         </div>
 
@@ -1089,9 +1095,9 @@ function SettingsView({ lang, setLang, theme, setTheme, density, setDensity, tea
         {creating && (
           <div style={{ ...card, padding: 20, marginBottom: 2, borderColor: "var(--accent)" }}>
             <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, textTransform: "uppercase", letterSpacing: "0.12em", color: "var(--muted)", marginBottom: 14 }}>
-              {lang === "de" ? "Neues Mitglied" : "New member"}
+              {lang === "de" ? "Neuer Urheber" : "New author"}
             </div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 160px", gap: 12, marginBottom: 14 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 14 }}>
               <div>
                 <FieldLabel>{lang === "de" ? "Name *" : "Name *"}</FieldLabel>
                 <input autoFocus value={newForm.name} onChange={e => setNewForm(f => ({ ...f, name: e.target.value }))}
@@ -1099,16 +1105,9 @@ function SettingsView({ lang, setLang, theme, setTheme, density, setDensity, tea
                   placeholder="Vorname Nachname" style={inputStyle} />
               </div>
               <div>
-                <FieldLabel>{lang === "de" ? "Abteilung" : "Department"}</FieldLabel>
+                <FieldLabel>{lang === "de" ? "Organisation" : "Organisation"}</FieldLabel>
                 <input value={newForm.dept} onChange={e => setNewForm(f => ({ ...f, dept: e.target.value }))}
-                  placeholder="Marketing" style={inputStyle} />
-              </div>
-              <div>
-                <FieldLabel>{lang === "de" ? "Rolle" : "Role"}</FieldLabel>
-                <select value={newForm.role} onChange={e => setNewForm(f => ({ ...f, role: e.target.value }))}
-                  style={{ ...inputStyle, cursor: "pointer" }}>
-                  {S_ROLES.map(r => <option key={r} value={r}>{r}</option>)}
-                </select>
+                  placeholder={lang === "de" ? "Agentur, Fotograf, intern…" : "Agency, photographer, in-house…"} style={inputStyle} />
               </div>
             </div>
             <div style={{ marginBottom: 16 }}>
@@ -1129,22 +1128,28 @@ function SettingsView({ lang, setLang, theme, setTheme, density, setDensity, tea
           </div>
         )}
 
-        {/* Team table */}
+        {/* Authors table */}
         <div style={{ ...card }}>
           <div style={{
-            display: "grid", gridTemplateColumns: "1fr 180px 140px 72px",
+            display: "grid", gridTemplateColumns: "1fr 220px 64px",
             padding: "10px 24px", borderBottom: "1px solid var(--line)",
           }}>
-            {[lang === "de" ? "Name" : "Name", lang === "de" ? "Abteilung" : "Department", lang === "de" ? "Rolle" : "Role", ""].map((h, i) => (
+            {[lang === "de" ? "Name" : "Name", lang === "de" ? "Organisation" : "Organisation", ""].map((h, i) => (
               <div key={i} style={{ fontFamily: "var(--font-mono)", fontSize: 10, textTransform: "uppercase", letterSpacing: "0.1em", color: "var(--muted)" }}>{h}</div>
             ))}
           </div>
+
+          {team.length === 0 && (
+            <div style={{ padding: "20px 24px", color: "var(--muted)", fontSize: 12 }}>
+              {lang === "de" ? "Noch keine Urheber angelegt." : "No authors yet."}
+            </div>
+          )}
 
           {team.map(u => {
             const isEditing = editingId === u.id;
             if (isEditing) return (
               <div key={u.id} style={{ padding: "16px 24px", borderBottom: "1px solid var(--line)", background: "var(--hover)" }}>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 160px", gap: 12, marginBottom: 12 }}>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
                   <div>
                     <FieldLabel>{lang === "de" ? "Name" : "Name"}</FieldLabel>
                     <input autoFocus value={editForm.name}
@@ -1153,14 +1158,10 @@ function SettingsView({ lang, setLang, theme, setTheme, density, setDensity, tea
                       style={inputStyle} />
                   </div>
                   <div>
-                    <FieldLabel>{lang === "de" ? "Abteilung" : "Department"}</FieldLabel>
-                    <input value={editForm.dept} onChange={e => setEditForm(f => ({ ...f, dept: e.target.value }))} style={inputStyle} />
-                  </div>
-                  <div>
-                    <FieldLabel>{lang === "de" ? "Rolle" : "Role"}</FieldLabel>
-                    <select value={editForm.role} onChange={e => setEditForm(f => ({ ...f, role: e.target.value }))} style={{ ...inputStyle, cursor: "pointer" }}>
-                      {S_ROLES.map(r => <option key={r} value={r}>{r}</option>)}
-                    </select>
+                    <FieldLabel>{lang === "de" ? "Organisation" : "Organisation"}</FieldLabel>
+                    <input value={editForm.dept} onChange={e => setEditForm(f => ({ ...f, dept: e.target.value }))}
+                      placeholder={lang === "de" ? "Agentur, Fotograf, intern…" : "Agency, photographer, in-house…"}
+                      style={inputStyle} />
                   </div>
                 </div>
                 <div style={{ marginBottom: 12 }}>
@@ -1181,7 +1182,7 @@ function SettingsView({ lang, setLang, theme, setTheme, density, setDensity, tea
             );
             return (
               <div key={u.id} style={{
-                display: "grid", gridTemplateColumns: "1fr 180px 140px 72px",
+                display: "grid", gridTemplateColumns: "1fr 220px 64px",
                 alignItems: "center", padding: "12px 24px",
                 borderBottom: "1px solid var(--line)",
               }}>
@@ -1189,19 +1190,14 @@ function SettingsView({ lang, setLang, theme, setTheme, density, setDensity, tea
                   <window.Avatar user={u} size={28} />
                   <div>
                     <div style={{ fontSize: 13, fontWeight: 500 }}>{u.name}</div>
-                    <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--muted)" }}>
-                      {u.name.toLowerCase().replace(/\s+/g, ".")}@koehler.co
-                    </div>
+                    {u.initials && (
+                      <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)", letterSpacing: "0.06em" }}>
+                        {u.initials}
+                      </div>
+                    )}
                   </div>
                 </div>
-                <div style={{ fontSize: 13, color: "var(--fg-2)" }}>{u.dept}</div>
-                <div>
-                  <span style={{
-                    fontFamily: "var(--font-mono)", fontSize: 10, textTransform: "uppercase",
-                    letterSpacing: "0.08em", padding: "3px 8px",
-                    border: "1px solid var(--line-strong)", color: "var(--muted)",
-                  }}>{u.role}</span>
-                </div>
+                <div style={{ fontSize: 13, color: "var(--fg-2)" }}>{u.dept || <span style={{ color: "var(--faint)", fontStyle: "italic", fontSize: 12 }}>—</span>}</div>
                 <div style={{ display: "flex", gap: 4, justifyContent: "flex-end" }}>
                   <button
                     onClick={e => startEdit(u, e)}
