@@ -1,654 +1,408 @@
-// Dev / Admin view — ported 1:1 from contextr AdminView
-// Firebase Functions via compat SDK; CSS vars mapped to picpop tokens
+// Admin-Bereich — Mandanten- und Benutzerverwaltung (nur für tomtautz@gmail.com)
 
 const { useState: useStateAdm, useEffect: useEffectAdm, useRef: useRefAdm } = React;
 
-// ── Callable wrappers ──────────────────────────────────────────────────────
+const ADMIN_API_KEY    = "AIzaSyBXnMXIhhaI3G3kvYfgRpceUy1k9oJ4cXs";
+const SUPERADMIN_EMAIL = "tomtautz@gmail.com";
 
-const MASTER_ID = 'master-workspace';
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
-const ONBOARD_OPTIONS = [
-  { id: 'presets',               label: 'Vorlagen',               sub: 'Composer-Presets' },
-  { id: 'collections',          label: 'Wissenssammlungen',      sub: 'Knowledge Base' },
-  { id: 'documents',            label: 'Wissensdokumente',       sub: 'Texte & Dateien' },
-  { id: 'languageRules',        label: 'Sprachregeln',           sub: 'Corporate Language' },
-  { id: 'settings',             label: 'Concierge-Einstellungen', sub: 'Systemprompt & Modus' },
-  { id: 'brainstormCollections', label: 'Brainstorm-Projekte',   sub: 'Vorlagen & Sammlungen' },
-];
-
-function getFunctions() { return firebase.app().functions('europe-west1'); }
-function callable(name) { return getFunctions().httpsCallable(name); }
-
-// ── Sub-components ─────────────────────────────────────────────────────────
-
-function Badge({ text, color }) {
-  return (
-    <span style={{
-      display: 'inline-flex', alignItems: 'center',
-      padding: '2px 8px', borderRadius: 99,
-      fontSize: 10, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase',
-      background: color, color: 'white',
-    }}>{text}</span>
-  );
-}
-
-function roleBadge(role) {
-  if (role === 'tenant_admin') return <Badge text="Admin" color="oklch(50% 0.15 250)" />;
-  return <Badge text="Member" color="oklch(55% 0.08 220)" />;
-}
-
-function NewCustomerForm({ onCreated }) {
-  const [name, setName] = useStateAdm('');
-  const [busy, setBusy] = useStateAdm(false);
-  const [err, setErr] = useStateAdm(null);
-  const [newTenantId, setNewTenantId] = useStateAdm(null);
-  const [checked, setChecked] = useStateAdm(new Set(['presets', 'languageRules']));
-  const [onboarding, setOnboarding] = useStateAdm(false);
-  const [onboardResult, setOnboardResult] = useStateAdm(null);
-
-  async function submit(e) {
-    e.preventDefault();
-    if (!name.trim()) return;
-    setBusy(true); setErr(null); setOnboardResult(null);
-    try {
-      const res = await callable('createCustomer')({ name: name.trim() });
-      onCreated(res.data.tenantId, name.trim());
-      setNewTenantId(res.data.tenantId);
-      setName('');
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
+async function adminCreateAuthUser(email, password) {
+  const res = await fetch(
+    `https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${ADMIN_API_KEY}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password, returnSecureToken: true }),
     }
-  }
-
-  function toggle(id) {
-    setChecked((prev) => {
-      const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
-      return next;
-    });
-  }
-
-  async function doOnboard() {
-    if (!newTenantId || checked.size === 0) return;
-    setOnboarding(true); setOnboardResult(null);
-    try {
-      const res = await callable('onboardTenant')({ tenantId: newTenantId, collections: [...checked] });
-      const total = Object.values(res.data.results).reduce((s, n) => s + n, 0);
-      setOnboardResult(`✓ ${total} Einträge übertragen`);
-    } catch (e) {
-      setOnboardResult(`Fehler: ${e instanceof Error ? e.message : String(e)}`);
-    } finally {
-      setOnboarding(false);
-    }
-  }
-
-  return (
-    <div style={{ marginBottom: 16 }}>
-      <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-        <input
-          value={name}
-          onChange={(e) => { setName(e.target.value); setNewTenantId(null); setOnboardResult(null); }}
-          placeholder="Kundenname…"
-          style={{ width: '100%', boxSizing: 'border-box', padding: '8px 10px', fontSize: 13, border: '1px solid var(--line-strong)', background: 'var(--bg)', color: 'var(--fg)', outline: 'none' }}
-        />
-        <button type="submit" disabled={busy || !name.trim()}
-          style={{ all: 'unset', boxSizing: 'border-box', width: '100%', cursor: busy ? 'not-allowed' : 'pointer', padding: '8px 16px', background: busy || !name.trim() ? 'var(--line-strong)' : 'var(--fg)', color: 'var(--bg)', fontSize: 12, fontWeight: 500, opacity: busy ? 0.6 : 1, textAlign: 'center' }}
-        >{busy ? '…' : '+ Anlegen'}</button>
-        {err && <span style={{ fontSize: 11, color: 'oklch(55% 0.18 25)' }}>{err}</span>}
-      </form>
-
-      {newTenantId && (
-        <div style={{ marginTop: 12, padding: '12px 14px', background: 'var(--bg)', border: '1px solid var(--line-strong)', display: 'flex', flexDirection: 'column', gap: 10 }}>
-          <div className="mono" style={{ fontSize: 9, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--accent)' }}>
-            Onboarding — aus Master-Workspace übernehmen
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {ONBOARD_OPTIONS.map((opt) => (
-              <label key={opt.id} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
-                <input type="checkbox" checked={checked.has(opt.id)} onChange={() => toggle(opt.id)}
-                  style={{ accentColor: 'var(--accent)', width: 13, height: 13, flexShrink: 0 }} />
-                <span style={{ fontSize: 12, color: 'var(--fg)' }}>{opt.label}</span>
-                <span className="mono" style={{ fontSize: 10, color: 'var(--muted)' }}>{opt.sub}</span>
-              </label>
-            ))}
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <button onClick={() => doOnboard()} disabled={onboarding || checked.size === 0}
-              style={{ all: 'unset', cursor: onboarding || checked.size === 0 ? 'not-allowed' : 'pointer', padding: '6px 14px', background: onboarding || checked.size === 0 ? 'var(--line-strong)' : 'var(--fg)', color: 'var(--bg)', fontSize: 12, fontWeight: 500, opacity: onboarding || checked.size === 0 ? 0.6 : 1 }}
-            >{onboarding ? '⟳ Übertrage…' : '↓ Jetzt einrichten'}</button>
-            <button onClick={() => setNewTenantId(null)}
-              style={{ all: 'unset', cursor: 'pointer', fontSize: 11, color: 'var(--muted)' }}
-              onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--fg)'; }}
-              onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--muted)'; }}
-            >Überspringen</button>
-            {onboardResult && (
-              <span style={{ fontSize: 11, color: onboardResult.startsWith('✓') ? 'oklch(45% 0.13 145)' : 'oklch(55% 0.18 25)' }}>
-                {onboardResult}
-              </span>
-            )}
-          </div>
-        </div>
-      )}
-    </div>
   );
+  const data = await res.json();
+  if (data.error) throw new Error(data.error.message);
+  return { uid: data.localId, email: data.email };
 }
 
-function NewUserForm({ tenantId, onCreated }) {
-  const [open, setOpen] = useStateAdm(false);
-  const [email, setEmail]           = useStateAdm('');
-  const [password, setPassword]     = useStateAdm('');
-  const [displayName, setDisplayName] = useStateAdm('');
-  const [role, setRole]             = useStateAdm('tenant_member');
-  const [busy, setBusy]             = useStateAdm(false);
-  const [err, setErr]               = useStateAdm(null);
-
-  async function submit(e) {
-    e.preventDefault();
-    if (!email || !password) return;
-    setBusy(true); setErr(null);
-    try {
-      await callable('createTenantUser')({ email, password, displayName, tenantId, role });
-      setEmail(''); setPassword(''); setDisplayName(''); setRole('tenant_member');
-      setOpen(false);
-      onCreated();
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  if (!open) {
-    return (
-      <button
-        onClick={() => setOpen(true)}
-        style={{
-          all: 'unset', cursor: 'pointer',
-          padding: '7px 14px', border: '1px solid var(--line-strong)',
-          fontSize: 12, color: 'var(--fg)',
-          display: 'inline-flex', alignItems: 'center', gap: 6,
-        }}
-        onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--line)'; }}
-        onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
-      >+ Neuer Benutzer</button>
-    );
-  }
-
-  const fields = [
-    { label: 'Name',     val: displayName, set: setDisplayName, type: 'text',     placeholder: 'Vollständiger Name' },
-    { label: 'E-Mail',   val: email,        set: setEmail,        type: 'email',    placeholder: 'user@example.com' },
-    { label: 'Passwort', val: password,     set: setPassword,     type: 'password', placeholder: 'Min. 8 Zeichen' },
-  ];
-
-  return (
-    <form onSubmit={submit} style={{
-      display: 'flex', flexDirection: 'column', gap: 10,
-      padding: 16, border: '1px solid var(--line-strong)', background: 'var(--panel)',
-      marginBottom: 12,
-    }}>
-      <div style={{ fontSize: 12, fontWeight: 500, marginBottom: 4 }}>Neuer Benutzer</div>
-      {fields.map(({ label, val, set, type, placeholder }) => (
-        <div key={label} style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-          <label style={{ fontSize: 11, color: 'var(--muted)', width: 60, flexShrink: 0 }}>{label}</label>
-          <input
-            type={type} value={val} onChange={(e) => set(e.target.value)}
-            placeholder={placeholder} required={label !== 'Name'}
-            style={{
-              flex: 1, padding: '6px 8px', fontSize: 12,
-              border: '1px solid var(--line-strong)', background: 'var(--bg)', color: 'var(--fg)',
-              outline: 'none',
-            }}
-          />
-        </div>
-      ))}
-      <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-        <label style={{ fontSize: 11, color: 'var(--muted)', width: 60, flexShrink: 0 }}>Rolle</label>
-        <select
-          value={role}
-          onChange={(e) => setRole(e.target.value)}
-          style={{
-            padding: '6px 8px', fontSize: 12,
-            border: '1px solid var(--line-strong)', background: 'var(--bg)', color: 'var(--fg)',
-          }}
-        >
-          <option value="tenant_member">Member</option>
-          <option value="tenant_admin">Admin</option>
-        </select>
-      </div>
-      {err && <div style={{ fontSize: 11, color: 'oklch(55% 0.18 25)' }}>{err}</div>}
-      <div style={{ display: 'flex', gap: 8 }}>
-        <button
-          type="submit" disabled={busy}
-          style={{
-            all: 'unset', cursor: busy ? 'not-allowed' : 'pointer',
-            padding: '7px 16px', background: 'var(--fg)', color: 'var(--bg)',
-            fontSize: 12, fontWeight: 500, opacity: busy ? 0.6 : 1,
-          }}
-        >{busy ? '…' : 'Erstellen'}</button>
-        <button
-          type="button" onClick={() => setOpen(false)}
-          style={{
-            all: 'unset', cursor: 'pointer',
-            padding: '7px 14px', border: '1px solid var(--line-strong)',
-            fontSize: 12, color: 'var(--muted)',
-          }}
-        >Abbrechen</button>
-      </div>
-    </form>
-  );
+async function adminSeedTenant(tenantId, companyName) {
+  const col = (name) => window.db.collection("tenants").doc(tenantId).collection(name);
+  await window.db.doc(`tenants/${tenantId}/settings/global`).set({
+    companyName,
+    createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+    llmProviderKeys: {},
+    aiPrompt: window.AI_DEFAULT_PROMPT || "",
+  });
+  await col("folders").doc("f-unsorted").set({
+    id: "f-unsorted", name: "Nicht zugeordnet", parent: null, count: 0,
+    pinned: false, sortOrder: 9999, updated: new Date().toISOString().slice(0, 10),
+    coverHues: [200, 220, 240, 260], owner: "system",
+  });
+  await col("pdfFolders").doc("p-unsorted").set({
+    id: "p-unsorted", name: "Nicht zugeordnet", parent: null, count: 0,
+    pinned: false, sortOrder: 9999, updated: new Date().toISOString().slice(0, 10),
+    coverHues: [200, 220, 240, 260], owner: "system",
+  });
 }
 
-function UserRow({ u, onRefresh }) {
-  const [busy, setBusy] = useStateAdm(false);
-  const [confirmDelete, setConfirmDelete] = useStateAdm(false);
-  const [editing, setEditing] = useStateAdm(false);
-  const [editName, setEditName] = useStateAdm(u.displayName);
-  const [editEmail, setEditEmail] = useStateAdm(u.email);
-  const [editPassword, setEditPassword] = useStateAdm('');
-  const [editErr, setEditErr] = useStateAdm(null);
-
-  async function toggleDisable() {
-    setBusy(true);
-    try { await callable('disableUser')({ uid: u.uid, disabled: !u.disabled }); onRefresh(); }
-    finally { setBusy(false); }
-  }
-
-  async function doDelete() {
-    setBusy(true);
-    try { await callable('deleteTenantUser')({ uid: u.uid }); onRefresh(); }
-    finally { setBusy(false); setConfirmDelete(false); }
-  }
-
-  async function saveEdit(e) {
-    e.preventDefault();
-    setBusy(true); setEditErr(null);
-    try {
-      const payload = { uid: u.uid };
-      if (editName !== u.displayName) payload.displayName = editName;
-      if (editEmail !== u.email) payload.email = editEmail;
-      if (editPassword) payload.password = editPassword;
-      await callable('updateTenantUser')(payload);
-      setEditPassword('');
-      setEditing(false);
-      onRefresh();
-    } catch (e) {
-      setEditErr(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  const inputStyle = {
-    padding: '5px 8px', fontSize: 12,
-    border: '1px solid var(--line-strong)', background: 'var(--bg)', color: 'var(--fg)',
-    outline: 'none', width: '100%', boxSizing: 'border-box',
-  };
-
-  if (editing) {
-    return (
-      <div style={{ padding: '12px 0', borderBottom: '1px solid var(--line)' }}>
-        <form onSubmit={saveEdit} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '70px 1fr', gap: 8, alignItems: 'center' }}>
-            <label style={{ fontSize: 11, color: 'var(--muted)' }}>Name</label>
-            <input style={inputStyle} value={editName} onChange={(e) => setEditName(e.target.value)} />
-            <label style={{ fontSize: 11, color: 'var(--muted)' }}>E-Mail</label>
-            <input style={inputStyle} type="email" value={editEmail} onChange={(e) => setEditEmail(e.target.value)} required />
-            <label style={{ fontSize: 11, color: 'var(--muted)' }}>Passwort</label>
-            <input style={inputStyle} type="password" value={editPassword} onChange={(e) => setEditPassword(e.target.value)} placeholder="Leer lassen = unverändert" />
-          </div>
-          {editErr && <div style={{ fontSize: 11, color: 'oklch(55% 0.18 25)' }}>{editErr}</div>}
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button type="submit" disabled={busy} style={{
-              all: 'unset', cursor: busy ? 'not-allowed' : 'pointer',
-              padding: '5px 14px', background: 'var(--fg)', color: 'var(--bg)',
-              fontSize: 11, fontWeight: 500, opacity: busy ? 0.6 : 1,
-            }}>{busy ? '…' : 'Speichern'}</button>
-            <button type="button" onClick={() => { setEditing(false); setEditErr(null); }} style={{
-              all: 'unset', cursor: 'pointer', padding: '5px 12px',
-              border: '1px solid var(--line-strong)', fontSize: 11, color: 'var(--muted)',
-            }}>Abbrechen</button>
-          </div>
-        </form>
-      </div>
-    );
-  }
-
-  return (
-    <div style={{
-      display: 'grid', gridTemplateColumns: '1fr 1fr auto auto auto auto',
-      alignItems: 'center', gap: 12,
-      padding: '10px 0', borderBottom: '1px solid var(--line)',
-    }}>
-      <div>
-        <div style={{ fontSize: 13, fontWeight: 500 }}>{u.displayName || '—'}</div>
-        <div className="mono" style={{ fontSize: 11, color: 'var(--muted)' }}>{u.email}</div>
-      </div>
-      <div>{roleBadge(u.role)}</div>
-      <div>
-        {u.disabled && <Badge text="Gesperrt" color="oklch(50% 0.18 25)" />}
-      </div>
-      <button
-        onClick={() => { setEditName(u.displayName); setEditEmail(u.email); setEditPassword(''); setEditing(true); }}
-        title="Bearbeiten"
-        style={{
-          all: 'unset', cursor: 'pointer',
-          padding: '4px 10px', border: '1px solid var(--line-strong)',
-          fontSize: 11, color: 'var(--muted)', whiteSpace: 'nowrap',
-        }}
-        onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--fg)'; }}
-        onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--muted)'; }}
-      >Bearbeiten</button>
-      <button
-        onClick={toggleDisable} disabled={busy}
-        style={{
-          all: 'unset', cursor: busy ? 'not-allowed' : 'pointer',
-          padding: '4px 10px', border: '1px solid var(--line-strong)',
-          fontSize: 11, color: 'var(--muted)', whiteSpace: 'nowrap',
-        }}
-        onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--fg)'; }}
-        onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--muted)'; }}
-      >{u.disabled ? 'Entsperren' : 'Sperren'}</button>
-      {confirmDelete ? (
-        <div style={{ display: 'flex', gap: 4 }}>
-          <button
-            onClick={doDelete} disabled={busy}
-            style={{
-              all: 'unset', cursor: 'pointer', padding: '4px 10px',
-              background: 'oklch(50% 0.18 25)', color: 'white', fontSize: 11,
-            }}
-          >{busy ? '…' : 'Löschen'}</button>
-          <button
-            onClick={() => setConfirmDelete(false)}
-            style={{ all: 'unset', cursor: 'pointer', padding: '4px 8px', fontSize: 11, color: 'var(--muted)' }}
-          >✕</button>
-        </div>
-      ) : (
-        <button
-          onClick={() => setConfirmDelete(true)}
-          style={{ all: 'unset', cursor: 'pointer', padding: '4px 8px', fontSize: 11, color: 'var(--muted)' }}
-          onMouseEnter={(e) => { e.currentTarget.style.color = 'oklch(50% 0.18 25)'; }}
-          onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--muted)'; }}
-        >✕</button>
-      )}
-    </div>
-  );
+function fmtDate(raw) {
+  if (!raw) return "—";
+  const d = raw.toDate ? raw.toDate() : new Date(raw);
+  return d.toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", year: "numeric" });
 }
 
-function TenantDetail({ tenant, onImpersonate }) {
-  const [users, setUsers] = useStateAdm([]);
-  const [loading, setLoading] = useStateAdm(true);
-  const [migrating, setMigrating] = useStateAdm(false);
-  const [migrateResult, setMigrateResult] = useStateAdm(null);
-  const refreshRef = useRefAdm(0);
+// ── TenantDetail ──────────────────────────────────────────────────────────────
+function TenantDetail({ tenant, onRefresh }) {
+  const [users,        setUsers]        = useStateAdm([]);
+  const [loadingUsers, setLoadingUsers] = useStateAdm(true);
+  const [showNewUser,  setShowNewUser]  = useStateAdm(false);
+  const [nuEmail,      setNuEmail]      = useStateAdm("");
+  const [nuPassword,   setNuPassword]   = useStateAdm("");
+  const [nuCreating,   setNuCreating]   = useStateAdm(false);
+  const [nuMsg,        setNuMsg]        = useStateAdm(null);
+  const [showPw,       setShowPw]       = useStateAdm(false);
+  const [deletingUid,  setDeletingUid]  = useStateAdm(null);
 
   async function loadUsers() {
-    setLoading(true);
+    setLoadingUsers(true);
     try {
-      const res = await callable('listUsersForTenant')({ tenantId: tenant.id });
-      setUsers(res.data);
+      const snap = await window.db.collection("tenants").doc(tenant.id).collection("users").get();
+      setUsers(snap.docs.map(d => d.data()).sort((a, b) => a.email.localeCompare(b.email)));
+    } catch (_) {}
+    setLoadingUsers(false);
+  }
+
+  useEffectAdm(() => {
+    setUsers([]); setShowNewUser(false); setNuMsg(null); setDeletingUid(null);
+    loadUsers();
+  }, [tenant.id]);
+
+  async function handleCreateUser(e) {
+    e.preventDefault();
+    setNuCreating(true); setNuMsg(null);
+    try {
+      const { uid, email } = await adminCreateAuthUser(nuEmail.trim(), nuPassword);
+      await window.db.collection("tenants").doc(tenant.id).collection("users").doc(uid).set({
+        uid, email, role: "editor",
+        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+      });
+      await window.db.collection("userTenants").doc(uid).set({ tenantId: tenant.id, email });
+      setNuMsg({ ok: true, text: `✓ ${email} angelegt` });
+      setNuEmail(""); setNuPassword(""); setShowNewUser(false);
+      await loadUsers(); onRefresh();
+    } catch (err) {
+      setNuMsg({ ok: false, text: err.message });
     } finally {
-      setLoading(false);
+      setNuCreating(false);
     }
   }
 
-  useEffectAdm(() => { loadUsers(); }, [tenant.id]);
+  async function handleRemoveUser(u) {
+    if (!window.confirm(`Nutzer ${u.email} wirklich aus diesem Workspace entfernen?\n\nDer Firebase Auth Account bleibt bestehen.`)) return;
+    setDeletingUid(u.uid);
+    try {
+      await window.db.collection("tenants").doc(tenant.id).collection("users").doc(u.uid).delete();
+      await window.db.collection("userTenants").doc(u.uid).delete().catch(() => {});
+      await loadUsers(); onRefresh();
+    } finally {
+      setDeletingUid(null);
+    }
+  }
 
-  const tick = () => { refreshRef.current++; loadUsers(); };
+  function viewAsTenant() {
+    sessionStorage.setItem("picpop_admin_impersonate", "1");
+    const base = window.location.origin + window.location.pathname;
+    window.location.href = `${base}?t=${tenant.id}`;
+  }
 
-  const createdDate = tenant.createdAt
-    ? new Date(tenant.createdAt.seconds * 1000).toLocaleDateString('de-DE')
-    : '—';
+  const inp = {
+    height: 34, padding: "0 10px", border: "1px solid var(--line-strong)",
+    borderRadius: 3, background: "var(--bg)", color: "var(--fg)",
+    fontSize: 13, outline: "none", boxSizing: "border-box", fontFamily: "var(--font-sans)",
+  };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      {/* Header */}
-      <div style={{ padding: '24px 32px 20px', borderBottom: '1px solid var(--line)' }}>
-        <div className="mono" style={{ fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--muted)', marginBottom: 6 }}>
-          Kunde · {tenant.id}
-        </div>
-        <h2 style={{ margin: '0 0 4px', fontSize: 22, fontWeight: 500 }}>{tenant.name}</h2>
-        <div style={{ fontSize: 12, color: 'var(--muted)' }}>Erstellt: {createdDate}</div>
-        <div style={{ marginTop: 14, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-          <button
-            onClick={() => onImpersonate(tenant.id)}
-            style={{
-              all: 'unset', cursor: 'pointer',
-              padding: '7px 16px', border: '1px solid var(--accent)',
-              fontSize: 12, color: 'var(--accent)', fontWeight: 500,
-              display: 'inline-flex', alignItems: 'center', gap: 6,
-            }}
-            onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--accent-soft)'; }}
-            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
-          >Als Kunde anzeigen →</button>
-          <button
-            disabled={migrating}
-            onClick={async () => {
-              setMigrating(true); setMigrateResult(null);
-              try {
-                const res = await callable('migrateToTenant')({ tenantId: tenant.id });
-                const total = Object.values(res.data.results).reduce((s, n) => s + n, 0);
-                setMigrateResult(`✓ ${total} Dokumente migriert`);
-              } catch (e) {
-                setMigrateResult(`Fehler: ${e instanceof Error ? e.message : String(e)}`);
-              } finally {
-                setMigrating(false);
-              }
-            }}
-            style={{
-              all: 'unset', cursor: migrating ? 'not-allowed' : 'pointer',
-              padding: '7px 14px', border: '1px solid var(--line-strong)',
-              fontSize: 12, color: 'var(--muted)', opacity: migrating ? 0.6 : 1,
-              display: 'inline-flex', alignItems: 'center', gap: 6,
-            }}
-            onMouseEnter={(e) => { if (!migrating) e.currentTarget.style.color = 'var(--fg)'; }}
-            onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--muted)'; }}
-          >{migrating ? '⟳ Migriert…' : '↑ Bestandsdaten migrieren'}</button>
-          {migrateResult && (
-            <span style={{ fontSize: 12, color: migrateResult.startsWith('✓') ? 'oklch(55% 0.15 145)' : 'oklch(55% 0.18 25)' }}>
-              {migrateResult}
-            </span>
-          )}
-        </div>
+    <div style={{ padding: "36px 44px", maxWidth: 860 }}>
+
+      {/* Breadcrumb */}
+      <div style={{ fontFamily: "var(--font-mono)", fontSize: 9, letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--muted)", marginBottom: 10 }}>
+        Kunden · {tenant.id}
       </div>
 
-      {/* Users */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: '20px 32px' }}>
-        <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--muted)', marginBottom: 14 }}>
-          Benutzer
+      {/* Heading */}
+      <div style={{ fontSize: 28, fontWeight: 600, letterSpacing: "-0.02em", marginBottom: 4 }}>
+        {tenant.name}
+      </div>
+      <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 32 }}>
+        Erstellt: {fmtDate(tenant.createdAt)}
+      </div>
+
+      {/* Action buttons */}
+      <div style={{ display: "flex", gap: 10, marginBottom: 44, flexWrap: "wrap" }}>
+        <button onClick={viewAsTenant} className="btn accent" style={{ gap: 8 }}>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>
+          </svg>
+          Als Mandant anzeigen →
+        </button>
+        <button onClick={() => window.open(`${window.location.origin}${window.location.pathname}?t=${tenant.id}`, "_blank")} className="btn">
+          In neuem Tab ↗
+        </button>
+      </div>
+
+      {/* ── Benutzer ── */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+        <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--muted)" }}>
+          Benutzer ({users.length})
         </div>
-        <NewUserForm tenantId={tenant.id} onCreated={tick} />
-        {loading ? (
-          <div className="mono" style={{ fontSize: 11, color: 'var(--muted)', padding: '16px 0' }}>Lädt…</div>
+        <button className="btn sm" onClick={() => { setShowNewUser(v => !v); setNuMsg(null); }}>
+          + Neuer Benutzer
+        </button>
+      </div>
+
+      {/* New user form */}
+      {showNewUser && (
+        <form onSubmit={handleCreateUser} style={{ background: "var(--panel)", border: "1px solid var(--line-strong)", borderRadius: 4, padding: "14px 16px", marginBottom: 12, display: "flex", flexDirection: "column", gap: 10 }}>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+            <div style={{ flex: "1 1 200px" }}>
+              <div style={{ fontSize: 10, fontFamily: "var(--font-mono)", textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--muted)", marginBottom: 5 }}>E-Mail</div>
+              <input type="email" value={nuEmail} onChange={e => setNuEmail(e.target.value)} required
+                placeholder="nutzer@firma.de" autoComplete="off" style={{ ...inp, width: "100%" }} />
+            </div>
+            <div style={{ flex: "0 0 200px" }}>
+              <div style={{ fontSize: 10, fontFamily: "var(--font-mono)", textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--muted)", marginBottom: 5 }}>Passwort</div>
+              <div style={{ position: "relative" }}>
+                <input type={showPw ? "text" : "password"} value={nuPassword} onChange={e => setNuPassword(e.target.value)}
+                  required placeholder="mind. 6 Zeichen" autoComplete="new-password"
+                  style={{ ...inp, width: "100%", paddingRight: 40 }} />
+                <button type="button" onClick={() => setShowPw(v => !v)} style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", color: "var(--muted)", padding: 0 }}>
+                  {showPw
+                    ? <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+                    : <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                  }
+                </button>
+              </div>
+            </div>
+            <button type="submit" disabled={nuCreating} className="btn primary sm" style={{ height: 34, flexShrink: 0 }}>
+              {nuCreating ? "…" : "Anlegen"}
+            </button>
+            <button type="button" onClick={() => setShowNewUser(false)} className="btn ghost sm" style={{ height: 34, flexShrink: 0 }}>Abbrechen</button>
+          </div>
+          {nuMsg && (
+            <div style={{ fontSize: 12, padding: "7px 10px", borderRadius: 3, background: nuMsg.ok ? "oklch(0.95 0.04 145)" : "var(--accent-soft)", color: nuMsg.ok ? "oklch(0.35 0.14 145)" : "var(--accent)" }}>
+              {nuMsg.text}
+            </div>
+          )}
+        </form>
+      )}
+
+      {nuMsg && !showNewUser && (
+        <div style={{ fontSize: 12, padding: "8px 12px", borderRadius: 4, marginBottom: 12, background: nuMsg.ok ? "oklch(0.95 0.04 145)" : "var(--accent-soft)", color: nuMsg.ok ? "oklch(0.35 0.14 145)" : "var(--accent)" }}>
+          {nuMsg.text}
+        </div>
+      )}
+
+      {/* User list */}
+      <div style={{ border: "1px solid var(--line)", borderRadius: 4, overflow: "hidden", background: "var(--panel)" }}>
+        {loadingUsers ? (
+          <div style={{ padding: 24, display: "flex", justifyContent: "center" }}>
+            <div style={{ width: 18, height: 18, border: "2px solid var(--line-strong)", borderTopColor: "var(--accent)", borderRadius: "50%", animation: "spin 0.7s linear infinite" }} />
+          </div>
         ) : users.length === 0 ? (
-          <div style={{ fontSize: 13, color: 'var(--muted)', padding: '16px 0' }}>Noch keine Benutzer</div>
-        ) : users.map((u) => (
-          <UserRow key={u.uid} u={u} onRefresh={tick} />
+          <div style={{ padding: "18px 16px", color: "var(--muted)", fontSize: 12 }}>
+            Keine Benutzer. Lege einen Nutzer an.
+          </div>
+        ) : users.map((u, i) => (
+          <div key={u.uid} style={{ display: "flex", alignItems: "center", padding: "11px 16px", borderBottom: i < users.length - 1 ? "1px solid var(--line)" : "none", gap: 12 }}>
+            <div style={{ width: 32, height: 32, borderRadius: "50%", background: "var(--hover)", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 13, color: "var(--muted)", flexShrink: 0 }}>
+              {(u.email || "?")[0].toUpperCase()}
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 13, fontWeight: 500 }} className="clamp-1">{u.displayName || u.email}</div>
+              <div style={{ fontSize: 11, color: "var(--muted)" }}>{u.email}</div>
+            </div>
+            <span style={{ display: "inline-flex", alignItems: "center", padding: "2px 8px", borderRadius: 3, fontSize: 10, fontWeight: 700, letterSpacing: "0.07em", textTransform: "uppercase", background: "var(--hover)", color: "var(--fg-2)", border: "1px solid var(--line)", flexShrink: 0 }}>
+              {u.role || "editor"}
+            </span>
+            <button className="btn ghost sm" style={{ flexShrink: 0, color: "var(--accent)" }}
+              onClick={() => handleRemoveUser(u)} disabled={deletingUid === u.uid}>
+              {deletingUid === u.uid ? "…" : "×"}
+            </button>
+          </div>
         ))}
+      </div>
+
+      {/* Login-URL hint */}
+      <div style={{ marginTop: 28, padding: "12px 16px", background: "var(--hover)", borderRadius: 4, fontSize: 12, color: "var(--muted)", lineHeight: 1.7 }}>
+        <span style={{ fontWeight: 600, color: "var(--fg-2)" }}>Login-URL:</span>&emsp;
+        <span style={{ fontFamily: "var(--font-mono)", color: "var(--fg)" }}>
+          {window.location.origin}{window.location.pathname}?t={tenant.id}
+        </span>
+        &emsp;·&emsp;
+        <span style={{ fontFamily: "var(--font-mono)", color: "var(--fg)" }}>{tenant.id}.picpop.de</span>
       </div>
     </div>
   );
 }
 
-// ── Main View ──────────────────────────────────────────────────────────────
-
+// ── AdminView ─────────────────────────────────────────────────────────────────
 function AdminView({ lang }) {
-  const [tenants, setTenants] = useStateAdm([]);
-  const [selected, setSelected] = useStateAdm(null);
-  const [loading, setLoading] = useStateAdm(true);
-  const [claimBusy, setClaimBusy] = useStateAdm(false);
-  const [claimMsg, setClaimMsg] = useStateAdm(null);
-  const [masterPopulating, setMasterPopulating] = useStateAdm(false);
-  const [masterMsg, setMasterMsg] = useStateAdm(null);
-  const [impersonating, setImpersonating] = useStateAdm(null);
+  const [tenants,   setTenants]   = useStateAdm([]);
+  const [loading,   setLoading]   = useStateAdm(true);
+  const [selectedId,setSelectedId]= useStateAdm(null);
+  const [search,    setSearch]    = useStateAdm("");
+  const [newId,     setNewId]     = useStateAdm("");
+  const [newName,   setNewName]   = useStateAdm("");
+  const [creating,  setCreating]  = useStateAdm(false);
+  const [createMsg, setCreateMsg] = useStateAdm(null);
 
   async function loadTenants() {
     setLoading(true);
     try {
-      const res = await callable('listCustomers')();
-      setTenants(res.data);
-    } catch (e) {
-      setTenants([]);
-    } finally {
-      setLoading(false);
-    }
+      const snap = await window.db.collection("tenants").get();
+      const list = await Promise.all(snap.docs.map(async d => {
+        let name = d.id, createdAt = null, userCount = 0;
+        try {
+          const s = await window.db.doc(`tenants/${d.id}/settings/global`).get();
+          if (s.exists) { const sd = s.data(); name = sd.companyName || d.id; createdAt = sd.createdAt; }
+          userCount = (await window.db.collection("tenants").doc(d.id).collection("users").get()).size;
+        } catch (_) {}
+        return { id: d.id, name, createdAt, userCount };
+      }));
+      list.sort((a, b) => a.id.localeCompare(b.id));
+      setTenants(list);
+    } catch (e) { console.error("loadTenants", e); }
+    setLoading(false);
   }
 
   useEffectAdm(() => { loadTenants(); }, []);
 
-  async function populateMaster() {
-    setMasterPopulating(true); setMasterMsg(null);
+  async function handleCreate(e) {
+    e.preventDefault();
+    const id   = newId.trim().toLowerCase().replace(/[^a-z0-9-]/g, "-");
+    const name = newName.trim();
+    if (!id || !name) return;
+    setCreating(true); setCreateMsg(null);
     try {
-      await callable('ensureMasterTenant')();
-      const res = await callable('migrateToTenant')({ tenantId: MASTER_ID });
-      const total = Object.values(res.data.results).reduce((s, n) => s + n, 0);
-      setMasterMsg(`✓ ${total} Einträge übertragen`);
-    } catch (e) {
-      setMasterMsg(`Fehler: ${e instanceof Error ? e.message : String(e)}`);
+      const exists = await window.db.doc(`tenants/${id}/settings/global`).get();
+      if (exists.exists) throw new Error(`„${id}" existiert bereits`);
+      await adminSeedTenant(id, name);
+      setCreateMsg({ ok: true, text: `✓ „${id}" angelegt` });
+      setNewId(""); setNewName("");
+      await loadTenants();
+      setSelectedId(id);
+      setTimeout(() => setCreateMsg(null), 3000);
+    } catch (err) {
+      setCreateMsg({ ok: false, text: err.message });
     } finally {
-      setMasterPopulating(false);
+      setCreating(false);
     }
   }
 
-  async function bootstrapSuperadmin() {
-    setClaimBusy(true); setClaimMsg(null);
-    try {
-      await callable('setSuperadminClaim')();
-      setClaimMsg('Superadmin-Claim gesetzt. Bitte neu einloggen (Tab neu laden).');
-    } catch (e) {
-      setClaimMsg(e instanceof Error ? e.message : String(e));
-    } finally {
-      setClaimBusy(false);
-    }
-  }
+  const filtered = tenants.filter(t =>
+    t.id.toLowerCase().includes(search.toLowerCase()) ||
+    t.name.toLowerCase().includes(search.toLowerCase())
+  );
+  const selected = tenants.find(t => t.id === selectedId);
 
   return (
-    <div style={{ display: 'flex', height: '100%', overflow: 'hidden' }}>
+    <div style={{ display: "flex", height: "100%", overflow: "hidden" }}>
 
-      {/* Left panel — customer list */}
-      <div style={{
-        width: 300, flexShrink: 0,
-        borderRight: '1px solid var(--line-strong)',
-        display: 'flex', flexDirection: 'column',
-        background: 'var(--panel)',
-      }}>
+      {/* ── Left panel ── */}
+      <div style={{ width: 276, flexShrink: 0, borderRight: "1px solid var(--line)", display: "flex", flexDirection: "column", background: "var(--panel)" }}>
 
-        {/* Master-Workspace button */}
-        <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--line)', display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <button
-            onClick={async () => {
-              try { await callable('ensureMasterTenant')(); } catch (_) { /* ignore */ }
-              setImpersonating(MASTER_ID);
-            }}
-            style={{ all: 'unset', cursor: 'pointer', width: '100%', padding: '10px 14px', background: 'var(--accent-soft)', border: '1px solid var(--accent)', color: 'var(--accent)', fontSize: 12, fontWeight: 500, display: 'flex', alignItems: 'center', gap: 8, boxSizing: 'border-box' }}
-            onMouseEnter={(e) => { e.currentTarget.style.opacity = '0.8'; }}
-            onMouseLeave={(e) => { e.currentTarget.style.opacity = '1'; }}
-          >
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/>
-            </svg>
-            Master-Workspace bearbeiten →
+        <div style={{ padding: "22px 18px 16px", borderBottom: "1px solid var(--line)" }}>
+          <div style={{ fontFamily: "var(--font-mono)", fontSize: 9, letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--muted)", marginBottom: 10 }}>System</div>
+          <div style={{ fontSize: 22, fontWeight: 600, letterSpacing: "-0.015em", marginBottom: 3 }}>Admin</div>
+          <div style={{ fontSize: 12, color: "var(--muted)" }}>Mandanten- und Benutzerverwaltung</div>
+        </div>
+
+        {/* Create form */}
+        <form onSubmit={handleCreate} style={{ padding: "14px 18px", borderBottom: "1px solid var(--line)", display: "flex", flexDirection: "column", gap: 7 }}>
+          <input value={newId}
+            onChange={e => setNewId(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, "-"))}
+            placeholder="tenant-id…"
+            style={{ height: 30, padding: "0 9px", border: "1px solid var(--line-strong)", borderRadius: 3, background: "var(--bg)", color: "var(--fg)", fontSize: 12, outline: "none", fontFamily: "var(--font-mono)" }}
+          />
+          <input value={newName} onChange={e => setNewName(e.target.value)}
+            placeholder="Firmenname…"
+            style={{ height: 30, padding: "0 9px", border: "1px solid var(--line-strong)", borderRadius: 3, background: "var(--bg)", color: "var(--fg)", fontSize: 12, outline: "none" }}
+          />
+          <button type="submit" disabled={creating || !newId || !newName}
+            style={{ height: 30, background: "var(--accent)", color: "#fff", border: "none", borderRadius: 3, cursor: (!newId || !newName) ? "default" : "pointer", fontSize: 12, fontWeight: 600, opacity: (!newId || !newName) ? 0.35 : 1, transition: "opacity .15s" }}>
+            {creating ? "Anlegen…" : "+ Anlegen"}
           </button>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <button
-              onClick={() => populateMaster()}
-              disabled={masterPopulating}
-              style={{ all: 'unset', cursor: masterPopulating ? 'not-allowed' : 'pointer', padding: '6px 12px', border: '1px solid var(--line-strong)', fontSize: 11, color: 'var(--muted)', opacity: masterPopulating ? 0.6 : 1, whiteSpace: 'nowrap' }}
-              onMouseEnter={(e) => { if (!masterPopulating) e.currentTarget.style.color = 'var(--fg)'; }}
-              onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--muted)'; }}
-            >{masterPopulating ? '⟳ Überträgt…' : '↑ Migrationsdaten laden'}</button>
-            {masterMsg && (
-              <span style={{ fontSize: 11, color: masterMsg.startsWith('✓') ? 'oklch(45% 0.13 145)' : 'oklch(55% 0.18 25)' }}>
-                {masterMsg}
-              </span>
-            )}
+          {createMsg && (
+            <div style={{ fontSize: 11, padding: "5px 8px", borderRadius: 3, background: createMsg.ok ? "oklch(0.95 0.04 145)" : "var(--accent-soft)", color: createMsg.ok ? "oklch(0.35 0.14 145)" : "var(--accent)" }}>
+              {createMsg.text}
+            </div>
+          )}
+        </form>
+
+        {/* Search */}
+        <div style={{ padding: "12px 18px 8px" }}>
+          <div style={{ fontFamily: "var(--font-mono)", fontSize: 9, letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--muted)", marginBottom: 8 }}>
+            Kunden ({tenants.length})
           </div>
-          <div className="mono" style={{ fontSize: 9, color: 'var(--muted)', lineHeight: 1.5 }}>
-            Vorlagen, Presets & Musterdaten für Onboarding
-          </div>
+          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Suchen…"
+            style={{ width: "100%", height: 28, padding: "0 9px", border: "1px solid var(--line)", borderRadius: 3, background: "var(--hover)", color: "var(--fg)", fontSize: 12, outline: "none", boxSizing: "border-box" }}
+          />
         </div>
 
-        <div style={{ padding: '16px 20px 12px' }}>
-          <div className="mono" style={{ fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--muted)', marginBottom: 14 }}>
-            Kunden
-          </div>
-          <NewCustomerForm onCreated={(id, name) => {
-            const t = { id, name, disabled: false };
-            setTenants((prev) => [t, ...prev]);
-            setSelected(t);
-          }} />
-        </div>
-        <div style={{ flex: 1, overflowY: 'auto', padding: '0 8px 12px' }}>
+        {/* List */}
+        <div className="scroll" style={{ flex: 1, overflowY: "auto" }}>
           {loading ? (
-            <div className="mono" style={{ fontSize: 11, color: 'var(--muted)', padding: '12px 12px' }}>Lädt…</div>
-          ) : tenants.length === 0 ? (
-            <div style={{ fontSize: 13, color: 'var(--muted)', padding: '12px 12px' }}>Noch keine Kunden</div>
-          ) : tenants.map((t) => (
-            <button
-              key={t.id}
-              onClick={() => setSelected(t)}
-              style={{
-                all: 'unset', cursor: 'pointer', width: '100%',
-                padding: '9px 12px', borderRadius: 4, boxSizing: 'border-box',
-                background: selected?.id === t.id ? 'var(--accent-soft)' : 'transparent',
-                display: 'flex', flexDirection: 'column', gap: 2,
-              }}
-              onMouseEnter={(e) => { if (selected?.id !== t.id) e.currentTarget.style.background = 'var(--hover)'; }}
-              onMouseLeave={(e) => { if (selected?.id !== t.id) e.currentTarget.style.background = 'transparent'; }}
+            <div style={{ padding: 24, display: "flex", justifyContent: "center" }}>
+              <div style={{ width: 18, height: 18, border: "2px solid var(--line-strong)", borderTopColor: "var(--accent)", borderRadius: "50%", animation: "spin 0.7s linear infinite" }} />
+            </div>
+          ) : filtered.length === 0 ? (
+            <div style={{ padding: "14px 18px", color: "var(--muted)", fontSize: 12 }}>Keine Mandanten.</div>
+          ) : filtered.map(t => (
+            <div key={t.id} onClick={() => setSelectedId(t.id)}
+              style={{ padding: "9px 18px", cursor: "pointer", borderLeft: `2px solid ${t.id === selectedId ? "var(--accent)" : "transparent"}`, background: t.id === selectedId ? "var(--hover)" : "transparent", transition: "background .1s" }}
+              onMouseEnter={e => { if (t.id !== selectedId) e.currentTarget.style.background = "var(--hover)"; }}
+              onMouseLeave={e => { if (t.id !== selectedId) e.currentTarget.style.background = "transparent"; }}
             >
-              <span style={{ fontSize: 13, fontWeight: selected?.id === t.id ? 500 : 400 }}>{t.name}</span>
-              <span className="mono" style={{ fontSize: 10, color: 'var(--muted)' }}>{t.id}</span>
-            </button>
+              <div style={{ fontSize: 13, fontWeight: t.id === selectedId ? 600 : 400, lineHeight: 1.3 }}>{t.name}</div>
+              <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)", marginTop: 2 }}>{t.id}</div>
+            </div>
           ))}
-        </div>
-
-        {/* Bootstrap */}
-        <div style={{ padding: '12px 20px', borderTop: '1px solid var(--line)' }}>
-          <div className="mono" style={{ fontSize: 9, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--muted)', marginBottom: 8 }}>
-            Einmalige Einrichtung
-          </div>
-          <button
-            onClick={bootstrapSuperadmin} disabled={claimBusy}
-            style={{
-              all: 'unset', cursor: claimBusy ? 'not-allowed' : 'pointer',
-              padding: '7px 14px', border: '1px solid var(--line-strong)',
-              fontSize: 11, color: 'var(--muted)', opacity: claimBusy ? 0.6 : 1,
-              display: 'inline-flex', alignItems: 'center',
-            }}
-            onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--fg)'; }}
-            onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--muted)'; }}
-          >{claimBusy ? '…' : 'Superadmin-Claim setzen'}</button>
-          {claimMsg && <div style={{ marginTop: 8, fontSize: 11, color: 'var(--muted)', lineHeight: 1.5 }}>{claimMsg}</div>}
         </div>
       </div>
 
-      {/* Right panel — tenant detail */}
-      <div style={{ flex: 1, minWidth: 0, overflowY: 'auto' }}>
-        {impersonating && (
-          <div style={{ padding: '12px 32px', background: 'var(--accent-soft)', borderBottom: '1px solid var(--accent)', display: 'flex', alignItems: 'center', gap: 12 }}>
-            <span style={{ fontSize: 12, color: 'var(--accent)' }}>
-              Workspace-Ansicht: <strong>{impersonating}</strong>
-            </span>
-            <button onClick={() => setImpersonating(null)} style={{ all: 'unset', cursor: 'pointer', fontSize: 11, color: 'var(--accent)', border: '1px solid var(--accent)', padding: '2px 10px' }}>
-              ✕ Beenden
-            </button>
-          </div>
-        )}
-        {selected ? (
-          <TenantDetail
-            key={selected.id}
-            tenant={selected}
-            onImpersonate={(id) => setImpersonating(id)}
-          />
-        ) : (
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--muted)', fontSize: 13 }}>
-            Kunden auswählen
-          </div>
-        )}
+      {/* ── Right panel ── */}
+      <div className="scroll" style={{ flex: 1, minWidth: 0, background: "var(--bg)", overflowY: "auto" }}>
+        {selected
+          ? <TenantDetail tenant={selected} onRefresh={loadTenants} lang={lang} />
+          : <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--muted)", fontSize: 13, fontFamily: "var(--font-mono)", letterSpacing: "0.05em" }}>Kunden auswählen</div>
+        }
       </div>
     </div>
   );
 }
 
-window.AdminView = AdminView;
+// ── ImpersonationBanner ───────────────────────────────────────────────────────
+function ImpersonationBanner({ tenantId }) {
+  function stop() {
+    sessionStorage.removeItem("picpop_admin_impersonate");
+    window.location.href = window.location.origin + window.location.pathname;
+  }
+  return (
+    <div style={{ position: "fixed", top: 0, left: 0, right: 0, zIndex: 9999, height: 36, background: "var(--accent)", color: "#fff", display: "flex", alignItems: "center", paddingLeft: 20, paddingRight: 12, gap: 10, fontSize: 12, letterSpacing: "0.01em", boxShadow: "0 2px 10px rgba(0,0,0,0.25)" }}>
+      <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase", opacity: 0.75 }}>Superadmin</span>
+      <span style={{ opacity: 0.4 }}>·</span>
+      <span>Ansicht als Mandant: <strong>{tenantId}</strong></span>
+      <div style={{ flex: 1 }} />
+      <button onClick={stop}
+        style={{ height: 26, padding: "0 14px", background: "rgba(255,255,255,0.2)", border: "1px solid rgba(255,255,255,0.35)", borderRadius: 3, color: "#fff", cursor: "pointer", fontSize: 12, fontWeight: 600 }}
+        onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.3)"}
+        onMouseLeave={e => e.currentTarget.style.background = "rgba(255,255,255,0.2)"}>
+        Beenden
+      </button>
+    </div>
+  );
+}
+
+function isImpersonating() {
+  return sessionStorage.getItem("picpop_admin_impersonate") === "1"
+    && window.CURRENT_USER?.email === SUPERADMIN_EMAIL
+    && !!new URLSearchParams(window.location.search).get("t");
+}
+
+Object.assign(window, { AdminView, ImpersonationBanner, isImpersonating, SUPERADMIN_EMAIL });

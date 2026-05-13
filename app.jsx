@@ -275,7 +275,16 @@ function Sidebar({ area, setArea, folders, route, setRoute, lang, onUpload, onCr
           <window.Icon.settings size={13} />
           <span>{t("nav_team")}</span>
         </div>
-        <div className="nav-item" onClick={() => onDevOpen?.()} style={{ opacity: 0.6 }}>
+        {/* Admin — nur für Superadmin sichtbar */}
+        {currentUser?.email === window.SUPERADMIN_EMAIL && (
+          <div className={"nav-item" + (baseRoute === "admin" ? " active" : "")} onClick={() => setRoute("admin")}>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/>
+            </svg>
+            <span>Admin</span>
+          </div>
+        )}
+        <div className="nav-item" onClick={() => onDevOpen?.()} style={{ opacity: 0.45 }}>
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
             <polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/>
           </svg>
@@ -696,10 +705,13 @@ function App() {
   return (
     <window.LangCtx.Provider value={{ lang, setLang, t }}>
      <window.FavCtx.Provider value={{ favorites, toggleFavorite, bulkSetFavorite }}>
+      {window.isImpersonating?.() && (
+        <window.ImpersonationBanner tenantId={window.TENANT_ID} />
+      )}
       {route === "external" ? (
         <window.ExternalShareView onExit={() => setRoute("favorites")} lang={lang} />
       ) : (
-        <div className="app">
+        <div className="app" style={window.isImpersonating?.() ? { paddingTop: 36 } : undefined}>
           <Sidebar
             area={area} setArea={setArea}
             folders={folders}
@@ -751,6 +763,11 @@ function App() {
               )}
               {dbReady && baseRoute === "tags" && <window.TagsView assets={assets} tags={tags} onSaveTag={saveTag} onDeleteTag={deleteTag} onOpenAsset={(a) => setOpenAsset(a)} lang={lang} />}
               {baseRoute === "shared" && <window.SharedView onOpenShare={() => setRoute("external")} lang={lang} />}
+              {baseRoute === "admin" && user?.email === window.SUPERADMIN_EMAIL && (
+                <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
+                  <window.AdminView lang={lang} />
+                </div>
+              )}
               {baseRoute === "dev" && <window.AdminView lang={lang} />}
               {baseRoute === "settings" && <window.SettingsView lang={lang} setLang={setLang} theme={theme} setTheme={setTheme} density={density} setDensity={setDensity} team={team} onSaveTeamMember={saveTeamMember} onDeleteTeamMember={deleteTeamMember} tags={tags} onSaveTag={saveTag} onDeleteTag={deleteTag} />}
             </div>
