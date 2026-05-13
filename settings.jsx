@@ -138,7 +138,7 @@ function SettingsView({ lang, setLang, theme, setTheme, density, setDensity, tea
   const [editingId, setEditingId] = useStateS(null);
   const [editForm, setEditForm] = useStateS({});
   const [creating, setCreating] = useStateS(false);
-  const [newForm, setNewForm] = useStateS({ name: "", dept: "", role: "in_house", hue: 200 });
+  const [newForm, setNewForm] = useStateS({ name: "", dept: "", instagram: "", role: "in_house", hue: 200 });
 
   /* ── Tags ── */
   const [tagEditingId, setTagEditingId] = useStateS(null);
@@ -421,7 +421,7 @@ function SettingsView({ lang, setLang, theme, setTheme, density, setDensity, tea
   function startEdit(u, e) {
     e?.stopPropagation();
     setEditingId(u.id);
-    setEditForm({ name: u.name, dept: u.dept, role: u.role, hue: u.hue });
+    setEditForm({ name: u.name, dept: u.dept || "", instagram: u.instagram || "", role: u.role, hue: u.hue });
     setCreating(false);
   }
 
@@ -431,7 +431,7 @@ function SettingsView({ lang, setLang, theme, setTheme, density, setDensity, tea
     const name = editForm.name.trim();
     const parts = name.split(" ");
     const initials = parts.length >= 2 ? (parts[0][0] + parts[parts.length - 1][0]).toUpperCase() : name.slice(0, 2).toUpperCase();
-    onSaveTeamMember?.({ ...u, name, initials, dept: editForm.dept.trim(), role: editForm.role, hue: editForm.hue });
+    onSaveTeamMember?.({ ...u, name, initials, dept: editForm.dept.trim(), instagram: editForm.instagram?.trim() || "", role: editForm.role, hue: editForm.hue });
     setEditingId(null);
   }
 
@@ -440,8 +440,8 @@ function SettingsView({ lang, setLang, theme, setTheme, density, setDensity, tea
     const name = newForm.name.trim();
     const parts = name.split(" ");
     const initials = parts.length >= 2 ? (parts[0][0] + parts[parts.length - 1][0]).toUpperCase() : name.slice(0, 2).toUpperCase();
-    onSaveTeamMember?.({ id: "u-" + Math.random().toString(36).slice(2, 8), name, initials, dept: newForm.dept.trim(), role: "in_house", hue: newForm.hue });
-    setNewForm({ name: "", dept: "", role: "in_house", hue: 200 });
+    onSaveTeamMember?.({ id: "u-" + Math.random().toString(36).slice(2, 8), name, initials, dept: newForm.dept.trim(), instagram: newForm.instagram?.trim() || "", role: "in_house", hue: newForm.hue });
+    setNewForm({ name: "", dept: "", instagram: "", role: "in_house", hue: 200 });
     setCreating(false);
   }
 
@@ -1097,7 +1097,7 @@ function SettingsView({ lang, setLang, theme, setTheme, density, setDensity, tea
             <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, textTransform: "uppercase", letterSpacing: "0.12em", color: "var(--muted)", marginBottom: 14 }}>
               {lang === "de" ? "Neuer Urheber" : "New author"}
             </div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 14 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 14 }}>
               <div>
                 <FieldLabel>{lang === "de" ? "Name *" : "Name *"}</FieldLabel>
                 <input autoFocus value={newForm.name} onChange={e => setNewForm(f => ({ ...f, name: e.target.value }))}
@@ -1108,6 +1108,14 @@ function SettingsView({ lang, setLang, theme, setTheme, density, setDensity, tea
                 <FieldLabel>E-Mail</FieldLabel>
                 <input type="email" value={newForm.dept} onChange={e => setNewForm(f => ({ ...f, dept: e.target.value }))}
                   placeholder="name@firma.de" style={inputStyle} />
+              </div>
+              <div>
+                <FieldLabel>Instagram</FieldLabel>
+                <div style={{ position: "relative" }}>
+                  <span style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "var(--muted)", fontSize: 13, pointerEvents: "none" }}>@</span>
+                  <input value={newForm.instagram} onChange={e => setNewForm(f => ({ ...f, instagram: e.target.value.replace(/^@/, "") }))}
+                    placeholder="handle" style={{ ...inputStyle, paddingLeft: 24 }} />
+                </div>
               </div>
             </div>
             <div style={{ marginBottom: 16 }}>
@@ -1131,10 +1139,10 @@ function SettingsView({ lang, setLang, theme, setTheme, density, setDensity, tea
         {/* Authors table */}
         <div style={{ ...card }}>
           <div style={{
-            display: "grid", gridTemplateColumns: "1fr 220px 64px",
+            display: "grid", gridTemplateColumns: "1fr 200px 140px 64px",
             padding: "10px 24px", borderBottom: "1px solid var(--line)",
           }}>
-            {["Name", "E-Mail", ""].map((h, i) => (
+            {["Name", "E-Mail", "Instagram", ""].map((h, i) => (
               <div key={i} style={{ fontFamily: "var(--font-mono)", fontSize: 10, textTransform: "uppercase", letterSpacing: "0.1em", color: "var(--muted)" }}>{h}</div>
             ))}
           </div>
@@ -1149,7 +1157,7 @@ function SettingsView({ lang, setLang, theme, setTheme, density, setDensity, tea
             const isEditing = editingId === u.id;
             if (isEditing) return (
               <div key={u.id} style={{ padding: "16px 24px", borderBottom: "1px solid var(--line)", background: "var(--hover)" }}>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 12 }}>
                   <div>
                     <FieldLabel>{lang === "de" ? "Name" : "Name"}</FieldLabel>
                     <input autoFocus value={editForm.name}
@@ -1160,8 +1168,15 @@ function SettingsView({ lang, setLang, theme, setTheme, density, setDensity, tea
                   <div>
                     <FieldLabel>E-Mail</FieldLabel>
                     <input type="email" value={editForm.dept} onChange={e => setEditForm(f => ({ ...f, dept: e.target.value }))}
-                      placeholder="name@firma.de"
-                      style={inputStyle} />
+                      placeholder="name@firma.de" style={inputStyle} />
+                  </div>
+                  <div>
+                    <FieldLabel>Instagram</FieldLabel>
+                    <div style={{ position: "relative" }}>
+                      <span style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "var(--muted)", fontSize: 13, pointerEvents: "none" }}>@</span>
+                      <input value={editForm.instagram || ""} onChange={e => setEditForm(f => ({ ...f, instagram: e.target.value.replace(/^@/, "") }))}
+                        placeholder="handle" style={{ ...inputStyle, paddingLeft: 24 }} />
+                    </div>
                   </div>
                 </div>
                 <div style={{ marginBottom: 12 }}>
@@ -1182,7 +1197,7 @@ function SettingsView({ lang, setLang, theme, setTheme, density, setDensity, tea
             );
             return (
               <div key={u.id} style={{
-                display: "grid", gridTemplateColumns: "1fr 220px 64px",
+                display: "grid", gridTemplateColumns: "1fr 200px 140px 64px",
                 alignItems: "center", padding: "12px 24px",
                 borderBottom: "1px solid var(--line)",
               }}>
@@ -1198,6 +1213,17 @@ function SettingsView({ lang, setLang, theme, setTheme, density, setDensity, tea
                   </div>
                 </div>
                 <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--fg-2)" }}>{u.dept || <span style={{ color: "var(--faint)", fontStyle: "italic", fontSize: 12, fontFamily: "var(--font-sans)" }}>—</span>}</div>
+                <div>
+                  {u.instagram
+                    ? <a href={`https://instagram.com/${u.instagram}`} target="_blank" rel="noopener"
+                        style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--fg-2)", textDecoration: "none" }}
+                        onMouseEnter={e => e.currentTarget.style.color = "var(--accent)"}
+                        onMouseLeave={e => e.currentTarget.style.color = "var(--fg-2)"}>
+                        @{u.instagram}
+                      </a>
+                    : <span style={{ color: "var(--faint)", fontSize: 12 }}>—</span>
+                  }
+                </div>
                 <div style={{ display: "flex", gap: 4, justifyContent: "flex-end" }}>
                   <button
                     onClick={e => startEdit(u, e)}
