@@ -35,6 +35,13 @@ async function adminCreateAuthUser(email, password) {
 
 async function adminSeedTenant(tenantId, companyName) {
   const col = (name) => window.db.collection("tenants").doc(tenantId).collection(name);
+
+  // Parent-Dokument anlegen — damit collection("tenants").get() den Eintrag findet
+  await window.db.collection("tenants").doc(tenantId).set({
+    id: tenantId, companyName,
+    createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+  });
+
   await window.db.doc(`tenants/${tenantId}/settings/global`).set({
     companyName,
     createdAt: firebase.firestore.FieldValue.serverTimestamp(),
@@ -269,10 +276,16 @@ function AdminView({ lang }) {
     try {
       const snap = await window.db.collection("tenants").get();
       const list = await Promise.all(snap.docs.map(async d => {
-        let name = d.id, createdAt = null, userCount = 0;
+        const data = d.data();
+        let name = data.companyName || d.id;
+        let createdAt = data.createdAt || null;
+        let userCount = 0;
         try {
-          const s = await window.db.doc(`tenants/${d.id}/settings/global`).get();
-          if (s.exists) { const sd = s.data(); name = sd.companyName || d.id; createdAt = sd.createdAt; }
+          // Fallback: companyName aus settings/global wenn noch kein Parent-Doc
+          if (!data.companyName) {
+            const s = await window.db.doc(`tenants/${d.id}/settings/global`).get();
+            if (s.exists) { name = s.data().companyName || d.id; createdAt = s.data().createdAt || null; }
+          }
           userCount = (await window.db.collection("tenants").doc(d.id).collection("users").get()).size;
         } catch (_) {}
         return { id: d.id, name, createdAt, userCount };
