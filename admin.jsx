@@ -296,7 +296,7 @@ function AdminView({ lang }) {
       if (exists.exists) throw new Error(`„${id}" existiert bereits`);
       await adminSeedTenant(id, name);
       setCreateMsg({ ok: true, text: `✓ „${id}" angelegt` });
-      setNewId(""); setNewName("");
+      setNewName("");
       await loadTenants();
       setSelectedId(id);
       setTimeout(() => setCreateMsg(null), 3000);
