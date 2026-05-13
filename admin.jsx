@@ -7,6 +7,18 @@ const SUPERADMIN_EMAIL = "tomtautz@gmail.com";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+// Firmennamen zu Tenant-ID slugifizieren
+// "Phæno Wolfsburg" → "phaeno-wolfsburg", "T.E. Systems GmbH" → "te-systems-gmbh"
+function slugify(name) {
+  return name.trim()
+    .toLowerCase()
+    .replace(/[äàáâã]/g, "a").replace(/[öòóôõ]/g, "o").replace(/[üùúû]/g, "u")
+    .replace(/æ/g, "ae").replace(/ø/g, "o").replace(/ß/g, "ss")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 40);
+}
+
 async function adminCreateAuthUser(email, password) {
   const res = await fetch(
     `https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${ADMIN_API_KEY}`,
@@ -247,10 +259,10 @@ function AdminView({ lang }) {
   const [loading,   setLoading]   = useStateAdm(true);
   const [selectedId,setSelectedId]= useStateAdm(null);
   const [search,    setSearch]    = useStateAdm("");
-  const [newId,     setNewId]     = useStateAdm("");
   const [newName,   setNewName]   = useStateAdm("");
   const [creating,  setCreating]  = useStateAdm(false);
   const [createMsg, setCreateMsg] = useStateAdm(null);
+  const newId = slugify(newName);
 
   async function loadTenants() {
     setLoading(true);
@@ -275,7 +287,7 @@ function AdminView({ lang }) {
 
   async function handleCreate(e) {
     e.preventDefault();
-    const id   = newId.trim().toLowerCase().replace(/[^a-z0-9-]/g, "-");
+    const id   = newId;
     const name = newName.trim();
     if (!id || !name) return;
     setCreating(true); setCreateMsg(null);
@@ -315,17 +327,17 @@ function AdminView({ lang }) {
 
         {/* Create form */}
         <form onSubmit={handleCreate} style={{ padding: "14px 18px", borderBottom: "1px solid var(--line)", display: "flex", flexDirection: "column", gap: 7 }}>
-          <input value={newId}
-            onChange={e => setNewId(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, "-"))}
-            placeholder="tenant-id…"
-            style={{ height: 30, padding: "0 9px", border: "1px solid var(--line-strong)", borderRadius: 3, background: "var(--bg)", color: "var(--fg)", fontSize: 12, outline: "none", fontFamily: "var(--font-mono)" }}
-          />
           <input value={newName} onChange={e => setNewName(e.target.value)}
-            placeholder="Firmenname…"
+            placeholder="Firmenname…" autoComplete="off"
             style={{ height: 30, padding: "0 9px", border: "1px solid var(--line-strong)", borderRadius: 3, background: "var(--bg)", color: "var(--fg)", fontSize: 12, outline: "none" }}
           />
-          <button type="submit" disabled={creating || !newId || !newName}
-            style={{ height: 30, background: "var(--accent)", color: "#fff", border: "none", borderRadius: 3, cursor: (!newId || !newName) ? "default" : "pointer", fontSize: 12, fontWeight: 600, opacity: (!newId || !newName) ? 0.35 : 1, transition: "opacity .15s" }}>
+          {newName && (
+            <div style={{ fontSize: 10, fontFamily: "var(--font-mono)", color: "var(--muted)", padding: "2px 2px" }}>
+              ID: <span style={{ color: "var(--fg-2)" }}>{newId}</span>
+            </div>
+          )}
+          <button type="submit" disabled={creating || !newId}
+            style={{ height: 30, background: "var(--accent)", color: "#fff", border: "none", borderRadius: 3, cursor: !newId ? "default" : "pointer", fontSize: 12, fontWeight: 600, opacity: !newId ? 0.35 : 1, transition: "opacity .15s" }}>
             {creating ? "Anlegen…" : "+ Anlegen"}
           </button>
           {createMsg && (
