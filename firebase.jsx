@@ -12,6 +12,8 @@ const FIREBASE_CONFIG = {
 firebase.initializeApp(FIREBASE_CONFIG);
 const db = firebase.firestore();
 const storage = firebase.storage();
+// Cloud Functions — Region europe-west1
+window._picpopFunctions = firebase.app().functions("europe-west1");
 
 // ── Tenant detection ──────────────────────────────────────────────────────────
 // Priority: ?t=xxx URL param  →  subdomain  →  "dev" (localhost fallback)

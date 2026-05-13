@@ -163,10 +163,17 @@ function TenantDetail({ tenant, onRefresh }) {
     const emailChanged = newEmail !== u.email;
 
     try {
-      if (emailChanged || editPassword) {
-        // Neue Credentials → neuen Firebase Auth Account anlegen, alten Firestore-Eintrag ersetzen
+      if (editPassword) {
+        // Passwort direkt via Cloud Function setzen (kein neuer Account nötig)
+        const setPassword = window._picpopFunctions.httpsCallable("adminSetPassword");
+        await setPassword({ uid: u.uid, newPassword: editPassword });
+        setEditMsg({ ok: true, text: `✓ Passwort für ${u.email} gesetzt.` });
+      }
+
+      if (emailChanged) {
+        // E-Mail-Änderung: neuen Auth-Account anlegen, Firestore-Einträge tauschen
         if (!editPassword) {
-          setEditMsg({ ok: false, text: "Neues Passwort erforderlich, wenn die E-Mail geändert wird." });
+          setEditMsg({ ok: false, text: "Bei E-Mail-Änderung bitte auch neues Passwort eingeben." });
           setEditSaving(false); return;
         }
         const { uid: newUid, email: confirmedEmail } = await adminCreateAuthUser(newEmail, editPassword);
@@ -177,15 +184,18 @@ function TenantDetail({ tenant, onRefresh }) {
         await window.db.collection("userTenants").doc(newUid).set({ tenantId: tenant.id, email: confirmedEmail });
         await window.db.collection("tenants").doc(tenant.id).collection("users").doc(u.uid).delete();
         await window.db.collection("userTenants").doc(u.uid).delete().catch(() => {});
-        setEditMsg({ ok: true, text: `✓ Zugangsdaten aktualisiert. Login: ${confirmedEmail}` });
-      } else {
-        // Nur Firestore-Anzeige aktualisieren (keine Credential-Änderung)
-        setEditMsg({ ok: true, text: "Keine Änderungen vorgenommen." });
+        setEditMsg({ ok: true, text: `✓ E-Mail + Passwort aktualisiert. Neuer Login: ${confirmedEmail}` });
       }
+
+      if (!editPassword && !emailChanged) {
+        setEditMsg({ ok: true, text: "Keine Änderungen." });
+      }
+
       setEditingUid(null);
       await loadUsers(); onRefresh();
     } catch (err) {
-      setEditMsg({ ok: false, text: err.message });
+      const msg = err?.details?.message || err?.message || String(err);
+      setEditMsg({ ok: false, text: msg });
     } finally {
       setEditSaving(false);
     }
@@ -367,12 +377,11 @@ function TenantDetail({ tenant, onRefresh }) {
                 </div>
 
                 {/* Info-Hinweis */}
-                <div style={{ fontSize: 11, color: "var(--muted)", lineHeight: 1.5 }}>
-                  {editEmail !== u.email || editPassword
-                    ? "⚠ E-Mail- oder Passwortänderung legt neuen Firebase-Account an. Alter Nutzer muss sich neu anmelden."
-                    : "Nur Passwort ändern? → unten Reset-E-Mail senden oder neues Passwort + gleiche E-Mail eingeben."
-                  }
-                </div>
+                {editEmail.trim() !== u.email && (
+                  <div style={{ fontSize: 11, color: "var(--muted)", lineHeight: 1.5 }}>
+                    ⚠ E-Mail-Änderung legt einen neuen Firebase-Account an — neues Passwort ist dann erforderlich.
+                  </div>
+                )}
 
                 {editMsg && (
                   <div style={{ fontSize: 12, padding: "7px 10px", borderRadius: 3, background: editMsg.ok ? "oklch(0.95 0.04 145)" : "var(--accent-soft)", color: editMsg.ok ? "oklch(0.35 0.14 145)" : "var(--accent)" }}>
