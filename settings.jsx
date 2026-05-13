@@ -1105,9 +1105,9 @@ function SettingsView({ lang, setLang, theme, setTheme, density, setDensity, tea
                   placeholder="Vorname Nachname" style={inputStyle} />
               </div>
               <div>
-                <FieldLabel>{lang === "de" ? "Organisation" : "Organisation"}</FieldLabel>
-                <input value={newForm.dept} onChange={e => setNewForm(f => ({ ...f, dept: e.target.value }))}
-                  placeholder={lang === "de" ? "Agentur, Fotograf, intern…" : "Agency, photographer, in-house…"} style={inputStyle} />
+                <FieldLabel>E-Mail</FieldLabel>
+                <input type="email" value={newForm.dept} onChange={e => setNewForm(f => ({ ...f, dept: e.target.value }))}
+                  placeholder="name@firma.de" style={inputStyle} />
               </div>
             </div>
             <div style={{ marginBottom: 16 }}>
@@ -1134,7 +1134,7 @@ function SettingsView({ lang, setLang, theme, setTheme, density, setDensity, tea
             display: "grid", gridTemplateColumns: "1fr 220px 64px",
             padding: "10px 24px", borderBottom: "1px solid var(--line)",
           }}>
-            {[lang === "de" ? "Name" : "Name", lang === "de" ? "Organisation" : "Organisation", ""].map((h, i) => (
+            {["Name", "E-Mail", ""].map((h, i) => (
               <div key={i} style={{ fontFamily: "var(--font-mono)", fontSize: 10, textTransform: "uppercase", letterSpacing: "0.1em", color: "var(--muted)" }}>{h}</div>
             ))}
           </div>
@@ -1158,9 +1158,9 @@ function SettingsView({ lang, setLang, theme, setTheme, density, setDensity, tea
                       style={inputStyle} />
                   </div>
                   <div>
-                    <FieldLabel>{lang === "de" ? "Organisation" : "Organisation"}</FieldLabel>
-                    <input value={editForm.dept} onChange={e => setEditForm(f => ({ ...f, dept: e.target.value }))}
-                      placeholder={lang === "de" ? "Agentur, Fotograf, intern…" : "Agency, photographer, in-house…"}
+                    <FieldLabel>E-Mail</FieldLabel>
+                    <input type="email" value={editForm.dept} onChange={e => setEditForm(f => ({ ...f, dept: e.target.value }))}
+                      placeholder="name@firma.de"
                       style={inputStyle} />
                   </div>
                 </div>
@@ -1197,7 +1197,7 @@ function SettingsView({ lang, setLang, theme, setTheme, density, setDensity, tea
                     )}
                   </div>
                 </div>
-                <div style={{ fontSize: 13, color: "var(--fg-2)" }}>{u.dept || <span style={{ color: "var(--faint)", fontStyle: "italic", fontSize: 12 }}>—</span>}</div>
+                <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--fg-2)" }}>{u.dept || <span style={{ color: "var(--faint)", fontStyle: "italic", fontSize: 12, fontFamily: "var(--font-sans)" }}>—</span>}</div>
                 <div style={{ display: "flex", gap: 4, justifyContent: "flex-end" }}>
                   <button
                     onClick={e => startEdit(u, e)}

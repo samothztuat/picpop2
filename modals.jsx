@@ -332,10 +332,7 @@ function AssetDetailModal({ open, asset, peerAssets, onNavigate, onClose, onShar
                         onClick={() => { save({ author: u.name, authorRole: "in_house" }); setShowAuthorPicker(false); }}
                       >
                         <window.Avatar user={u} size={24} />
-                        <div style={{ flex: 1 }}>
-                          <div style={{ fontSize: 13, fontWeight: 500 }}>{u.name}</div>
-                          <div style={{ fontSize: 11, color: "var(--muted)" }}>{u.dept} · {u.role}</div>
-                        </div>
+                        <div style={{ fontSize: 13, fontWeight: 500, flex: 1 }}>{u.name}</div>
                         {isActive && <window.Icon.check size={13} style={{ color: "var(--accent)", flexShrink: 0 }} />}
                       </div>
                     );
