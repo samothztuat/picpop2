@@ -32,12 +32,13 @@ function DlBtn({ asset, lang }) {
 }
 
 // -------- RecentView --------
-function RecentView({ onOpenFolder, onOpenAsset, onShareTarget, onDeleteAssets, onBulkAddTag, onBulkSetAuthor, onBulkMoveAssets, lang, area, assets: assetsProp, folders: foldersProp, pdfFolders: pdfFoldersProp }) {
+function RecentView({ onOpenFolder, onOpenAsset, onShareTarget, onDeleteAssets, onBulkAddTag, onBulkSetAuthor, onBulkMoveAssets, lang, area, assets: assetsProp, folders: foldersProp, pdfFolders: pdfFoldersProp, sharedLinks: sharedLinksProp, currentUser }) {
   const t = window.makeT(lang);
   const isPdf = area === "print";
   const allFolders    = foldersProp    || window.FOLDERS;
   const allPdfFolders = pdfFoldersProp || window.PDF_FOLDERS;
   const allAssets     = assetsProp     || window.ASSETS;
+  const sharedLinks   = sharedLinksProp || window.SHARED_LINKS || [];
   const { favorites, bulkSetFavorite } = window.useFav();
   const [selection, setSelection] = useStateV(() => new Set());
 
@@ -93,16 +94,28 @@ function RecentView({ onOpenFolder, onOpenAsset, onShareTarget, onDeleteAssets, 
           <div className="h-display" style={{ marginTop: 8 }}>
             {isPdf
               ? (lang === "de" ? "Drucksachen & Print" : "Print & documents")
-              : (lang === "de" ? "Guten Morgen, Tom" : "Good morning, Tom")}
+              : (() => {
+                  const name = currentUser?.displayName || currentUser?.email?.split("@")[0] || "";
+                  const h = new Date().getHours();
+                  const gr = lang === "de"
+                    ? (h < 12 ? "Guten Morgen" : h < 18 ? "Guten Tag" : "Guten Abend")
+                    : (h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening");
+                  return name ? `${gr}, ${name.split(" ")[0]}` : gr;
+                })()}
           </div>
           <div style={{ color: "var(--muted)", fontSize: 14, marginTop: 8 }}>
             {isPdf
               ? (lang === "de"
                   ? `${allPdfFolders.length} Sammlungen · ${allAssets.filter(a => a.kind === "pdf").length} Dokumente`
                   : `${allPdfFolders.length} collections · ${allAssets.filter(a => a.kind === "pdf").length} documents`)
-              : (lang === "de"
-                  ? "8 Ordner aktiv · 3 neue geteilte Links · 36 Uploads diese Woche"
-                  : "8 active folders · 3 new shared links · 36 uploads this week")}
+              : (() => {
+                  const weekAgo = new Date(Date.now() - 7*24*60*60*1000).toISOString().slice(0,10);
+                  const uploadsThisWeek = allAssets.filter(a => a.kind !== "pdf" && a.date >= weekAgo).length;
+                  const totalFolders = allFolders.length + allPdfFolders.length;
+                  return lang === "de"
+                    ? `${totalFolders} Ordner · ${sharedLinks.length} geteilte Links · ${uploadsThisWeek} Uploads diese Woche`
+                    : `${totalFolders} folders · ${sharedLinks.length} shared links · ${uploadsThisWeek} uploads this week`;
+                })()}
           </div>
         </div>
       </div>
@@ -145,62 +158,99 @@ function RecentView({ onOpenFolder, onOpenAsset, onShareTarget, onDeleteAssets, 
           </div>
         </div>
 
-        {/* Activity */}
+        {/* Right column */}
         <div>
-          <window.SectionHeader
-            eyebrow={t("recent_activity")}
-            title={lang === "de" ? "Was zuletzt passiert ist" : "What happened lately"}
-          />
-          <div className="card" style={{ padding: "4px 16px" }}>
-            {activity.map(renderActivity)}
-          </div>
+          {/* Storage card — berechnet aus echten Asset-Größen */}
+          {(() => {
+            const imgMb  = allAssets.filter(a => a.kind !== "pdf").reduce((s,a) => s + (a.size || 0), 0);
+            const pdfMb  = allAssets.filter(a => a.kind === "pdf").reduce((s,a) => s + (a.size || 0), 0);
+            const totalMb = imgMb + pdfMb;
+            const fmt = (mb) => mb >= 1024 ? `${(mb/1024).toFixed(1)} GB` : `${Math.round(mb)} MB`;
+            const totalLabel = fmt(totalMb);
+            const limitGb = 10; // Firebase Storage Free-Tier: 5 GB; Blaze: unbegrenzt — zeige als relativen Wert
+            const pct = Math.min(100, (totalMb / (limitGb * 1024)) * 100);
+            return (
+              <div className="card" style={{ padding: 20, marginBottom: 16 }}>
+                <div className="eyebrow" style={{ marginBottom: 12 }}>{t("storage")}</div>
+                <div className="row" style={{ justifyContent: "space-between", alignItems: "end" }}>
+                  <div className="h-1 num" style={{ fontSize: 36 }}>
+                    {totalMb >= 1024
+                      ? <>{(totalMb/1024).toFixed(1)} <span style={{ fontSize: 16, color: "var(--muted)" }}>GB</span></>
+                      : <>{Math.round(totalMb)} <span style={{ fontSize: 16, color: "var(--muted)" }}>MB</span></>}
+                  </div>
+                  <div className="mono" style={{ color: "var(--muted)", fontSize: 11 }}>
+                    {allAssets.length} {lang === "de" ? "Dateien" : "files"}
+                  </div>
+                </div>
+                <div style={{ height: 4, background: "var(--hover)", borderRadius: 2, marginTop: 12, overflow: "hidden" }}>
+                  <div style={{ width: `${Math.max(pct, 1)}%`, height: "100%", background: "var(--fg)", transition: "width .4s" }} />
+                </div>
+                <div className="row" style={{ marginTop: 12, gap: 16, fontSize: 12, color: "var(--muted)", flexWrap: "wrap" }}>
+                  <span><span className="dot" style={{ background: "var(--fg)" }} /> {lang === "de" ? "Bilder" : "Images"} {fmt(imgMb)}</span>
+                  {pdfMb > 0 && <span><span className="dot" style={{ background: "var(--accent)" }} /> PDF {fmt(pdfMb)}</span>}
+                </div>
+              </div>
+            );
+          })()}
 
-          {/* Storage card */}
-          <div className="card" style={{ marginTop: 24, padding: 20 }}>
-            <div className="eyebrow" style={{ marginBottom: 12 }}>{t("storage")}</div>
-            <div className="row" style={{ justifyContent: "space-between", alignItems: "end" }}>
-              <div className="h-1 num">
-                {isPdf ? <>84 <span style={{ fontSize: 16, color: "var(--muted)" }}>GB</span></> : <>428 <span style={{ fontSize: 16, color: "var(--muted)" }}>GB</span></>}
-              </div>
-              <div className="mono" style={{ color: "var(--muted)" }}>{t("used_storage")}</div>
-            </div>
-            <div style={{ height: 4, background: "var(--hover)", borderRadius: 2, marginTop: 12, overflow: "hidden" }}>
-              <div style={{ width: isPdf ? "8%" : "42%", height: "100%", background: "var(--fg)" }} />
-            </div>
-            {isPdf ? (
-              <div className="row" style={{ marginTop: 12, gap: 16, fontSize: 12, color: "var(--muted)" }}>
-                <span><span className="dot" style={{ background: "var(--accent)" }} /> PDF 84 GB</span>
-                <span><span className="dot" style={{ background: "var(--line-strong)" }} /> {lang === "de" ? "Gesamt-Limit" : "Total limit"} 1 TB</span>
-              </div>
-            ) : (
-              <div className="row" style={{ marginTop: 12, gap: 16, fontSize: 12, color: "var(--muted)" }}>
-                <span><span className="dot" style={{ background: "var(--fg)" }} /> {lang === "de" ? "Bilder" : "Images"} 312 GB</span>
-                <span><span className="dot" style={{ background: "var(--accent)" }} /> PDF 84 GB</span>
-                <span><span className="dot" style={{ background: "var(--line-strong)" }} /> {lang === "de" ? "Sonstiges" : "Other"} 32 GB</span>
-              </div>
-            )}
-          </div>
-
-          {/* Shared links */}
-          <div className="card" style={{ marginTop: 16, padding: 20 }}>
+          {/* Shared links — aus Firestore */}
+          <div className="card" style={{ padding: 20, marginBottom: 16 }}>
             <div className="row" style={{ justifyContent: "space-between", marginBottom: 12 }}>
               <div className="eyebrow">{t("nav_shared")}</div>
-              <span className="mono num" style={{ color: "var(--muted)" }}>{window.SHARED_LINKS.length}</span>
+              <span className="mono num" style={{ color: "var(--muted)" }}>{sharedLinks.length}</span>
             </div>
-            {window.SHARED_LINKS.slice(0, 3).map(sl => {
-              const target = sl.folder ? window.folderById(sl.folder) : null;
+            {sharedLinks.length === 0 ? (
+              <div style={{ fontSize: 12, color: "var(--muted)", padding: "8px 0" }}>
+                {lang === "de" ? "Keine geteilten Links." : "No shared links yet."}
+              </div>
+            ) : sharedLinks.slice(0, 4).map(sl => {
+              const target = sl.folder
+                ? [...allFolders, ...allPdfFolders].find(f => f.id === sl.folder)
+                : null;
+              const label = target?.name || sl.asset || sl.title || sl.id;
               return (
                 <div key={sl.id} className="row" style={{ gap: 10, padding: "10px 0", borderTop: "1px solid var(--line)" }}>
-                  <div style={{ width: 28, height: 28, background: "var(--accent-soft)", color: "var(--accent)", borderRadius: 4, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+                  <div style={{ width: 28, height: 28, background: "var(--accent-soft)", color: "var(--accent)", borderRadius: 4, display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
                     <window.Icon.link size={13} />
                   </div>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div className="clamp-1" style={{ fontSize: 13, fontWeight: 500 }}>{target ? target.name : sl.asset}</div>
-                    <div className="mono" style={{ color: "var(--muted)" }}>{sl.views} views · {sl.expires ? sl.expires : t("never")}</div>
+                    <div className="clamp-1" style={{ fontSize: 13, fontWeight: 500 }}>{label}</div>
+                    <div className="mono" style={{ color: "var(--muted)", fontSize: 10 }}>
+                      {sl.views != null ? `${sl.views} views · ` : ""}
+                      {sl.expires ? sl.expires : t("never")}
+                    </div>
                   </div>
                 </div>
               );
             })}
+          </div>
+
+          {/* Letzte Uploads */}
+          <div className="card" style={{ padding: 20 }}>
+            <div className="eyebrow" style={{ marginBottom: 12 }}>
+              {lang === "de" ? "Zuletzt hochgeladen" : "Recently uploaded"}
+            </div>
+            {recentAssets.length === 0 ? (
+              <div style={{ fontSize: 12, color: "var(--muted)", padding: "8px 0" }}>
+                {lang === "de" ? "Noch keine Dateien." : "No files yet."}
+              </div>
+            ) : recentAssets.slice(0, 5).map((a, i) => (
+              <div key={a.id} className="row" style={{ gap: 10, padding: "9px 0", borderTop: i > 0 ? "1px solid var(--line)" : "none", cursor: "pointer" }}
+                onClick={() => onOpenAsset(a)}>
+                <div style={{ width: 36, height: 28, borderRadius: 3, overflow: "hidden", background: "var(--hover)", flexShrink: 0 }}>
+                  {a.thumb
+                    ? <img src={a.thumb} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                    : <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                        <window.Icon.image size={12} style={{ color: "var(--muted)" }} />
+                      </div>
+                  }
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div className="clamp-1" style={{ fontSize: 12, fontWeight: 500 }}>{a.title}</div>
+                  <div className="mono" style={{ color: "var(--muted)", fontSize: 10 }}>{a.date}</div>
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       </div>

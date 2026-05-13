@@ -442,6 +442,7 @@ function App() {
   const [assets, setAssets] = useStateA([]);
   const [tags, setTags] = useStateA(window.TAGS);
   const [team, setTeam] = useStateA(window.TEAM);
+  const [sharedLinks, setSharedLinks] = useStateA([]);
   const [dbReady, setDbReady] = useStateA(false);
 
   // Keep window globals in sync so views that read them directly stay current
@@ -450,6 +451,7 @@ function App() {
   useEffectA(() => { window.ASSETS = assets; }, [assets]);
   useEffectA(() => { window.TAGS = tags; }, [tags]);
   useEffectA(() => { window.TEAM = team; }, [team]);
+  useEffectA(() => { window.SHARED_LINKS = sharedLinks; }, [sharedLinks]);
 
   // Firestore: seed on first load, then subscribe to live updates
   // Only runs when user is authenticated (user changes from null → object)
@@ -457,7 +459,7 @@ function App() {
     if (!user) {
       // Reset data state on logout
       setDbReady(false);
-      setImageFolders([]); setPdfFolders([]); setAssets([]); setTags(window.TAGS); setTeam(window.TEAM);
+      setImageFolders([]); setPdfFolders([]); setAssets([]); setTags(window.TAGS); setTeam(window.TEAM); setSharedLinks([]);
       return;
     }
 
@@ -479,6 +481,9 @@ function App() {
         });
         unsubTeam = window.subscribeToTeam(data => {
           if (data.length > 0) { window.TEAM = data; setTeam(data); }
+        });
+        window.subscribeToSharedLinks(data => {
+          window.SHARED_LINKS = data; setSharedLinks(data);
         });
       })
       .catch(err => {
@@ -738,7 +743,7 @@ function App() {
                 </div>
               )}
               {dbReady && baseRoute === "recent" && (
-                <window.RecentView area={area} assets={assets} folders={imageFolders} pdfFolders={pdfFolders} onOpenFolder={openFolder} onOpenAsset={(a) => setOpenAsset(a)} onShareTarget={setShareTarget} onDeleteAssets={deleteAssets} onBulkAddTag={bulkAddTag} onBulkSetAuthor={bulkSetAuthor} onBulkMoveAssets={bulkMoveAssets} lang={lang} />
+                <window.RecentView area={area} assets={assets} folders={imageFolders} pdfFolders={pdfFolders} sharedLinks={sharedLinks} currentUser={user} onOpenFolder={openFolder} onOpenAsset={(a) => setOpenAsset(a)} onShareTarget={setShareTarget} onDeleteAssets={deleteAssets} onBulkAddTag={bulkAddTag} onBulkSetAuthor={bulkSetAuthor} onBulkMoveAssets={bulkMoveAssets} lang={lang} />
               )}
               {dbReady && baseRoute === "favorites" && (
                 <window.FavoritesView assets={assets} area={area} lang={lang} onOpenAsset={(a) => setOpenAsset(a)} onOpenFolder={openFolder} onShareTarget={setShareTarget} query={query} onDeleteAssets={deleteAssets} onBulkAddTag={bulkAddTag} onBulkSetAuthor={bulkSetAuthor} onBulkMoveAssets={bulkMoveAssets} imageFolders={imageFolders} pdfFolders={pdfFolders} />
