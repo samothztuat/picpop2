@@ -13,6 +13,10 @@ const FB_CFG = {
   appId:             "1:895374281311:web:6863b936b1c69278e029ea",
 };
 
+/* ── Default AI prompt for image analysis ── */
+const DEFAULT_AI_PROMPT = `Liste die wichtigsten Bildinhalte als kommagetrennte Stichwörter auf Deutsch. Erfasse alle relevanten Aspekte: Hauptmotiv, Personen (Anzahl, Geschlecht, Alter falls erkennbar), Objekte, Ort/Setting, Farben, Stimmung, Aktivitäten, Markennamen oder Texte falls sichtbar. Maximal 20 Begriffe. Ausgabe: ausschließlich die kommagetrennte Stichwortliste — kein Satz, kein Präambel, kein Punkt am Ende.`;
+window.AI_DEFAULT_PROMPT = DEFAULT_AI_PROMPT;
+
 /* ── LLM providers picpop uses ── */
 const LLM_PROVIDERS = [
   {
@@ -124,6 +128,11 @@ function SettingsView({ lang, setLang, theme, setTheme, density, setDensity, tea
   const [llmSaving, setLlmSaving] = useStateS(false);
   const [llmSavedMsg, setLlmSavedMsg] = useStateS(false);
   const llmSavedTimer = useRefS(null);
+  /* ── AI Prompt ── */
+  const [aiPrompt,      setAiPrompt]      = useStateS(DEFAULT_AI_PROMPT);
+  const [aiPromptDraft, setAiPromptDraft] = useStateS(DEFAULT_AI_PROMPT);
+  const [promptSaving,  setPromptSaving]  = useStateS(false);
+  const [promptSavedMsg,setPromptSavedMsg]= useStateS(false);
 
   /* ── Team ── */
   const [editingId, setEditingId] = useStateS(null);
@@ -178,6 +187,7 @@ function SettingsView({ lang, setLang, theme, setTheme, density, setDensity, tea
           const keys = d.llmProviderKeys || {};
           setProviderKeys(keys);
           setKeyDrafts(keys);
+          if (d.aiPrompt) { setAiPrompt(d.aiPrompt); setAiPromptDraft(d.aiPrompt); window.AI_CONFIG = window.AI_CONFIG || {}; window.AI_CONFIG.prompt = d.aiPrompt; }
           if (d.accentHue) setAccentHue(d.accentHue);
           if (d.github) {
             const g = d.github;
@@ -206,6 +216,7 @@ function SettingsView({ lang, setLang, theme, setTheme, density, setDensity, tea
         { merge: true }
       );
       setProviderKeys({ ...keyDrafts });
+      window.loadAiConfig?.();
       setLlmSavedMsg(true);
       if (llmSavedTimer.current) clearTimeout(llmSavedTimer.current);
       llmSavedTimer.current = setTimeout(() => setLlmSavedMsg(false), 2500);
@@ -214,6 +225,24 @@ function SettingsView({ lang, setLang, theme, setTheme, density, setDensity, tea
     } finally {
       setLlmSaving(false);
     }
+  }
+
+  /* ── AI Prompt: save ── */
+  async function savePrompt() {
+    if (promptSaving) return;
+    setPromptSaving(true);
+    try {
+      const val = aiPromptDraft.trim() || DEFAULT_AI_PROMPT;
+      await firebase.firestore().doc("settings/global").set(
+        { aiPrompt: val, updatedAt: firebase.firestore.FieldValue.serverTimestamp() },
+        { merge: true }
+      );
+      setAiPrompt(val); setAiPromptDraft(val);
+      if (window.AI_CONFIG) window.AI_CONFIG.prompt = val;
+      setPromptSavedMsg(true);
+      setTimeout(() => setPromptSavedMsg(false), 2500);
+    } catch (e) { alert("Fehler: " + e.message); }
+    finally { setPromptSaving(false); }
   }
 
   /* ── GitHub helpers ── */
@@ -983,6 +1012,55 @@ function SettingsView({ lang, setLang, theme, setTheme, density, setDensity, tea
           >
             {llmSaving ? (lang === "de" ? "Speichert…" : "Saving…") : (lang === "de" ? "Speichern" : "Save")}
           </button>
+        </div>
+        {/* ── Analyse-Prompt ── */}
+        <div style={{ ...card, padding: "20px 24px", marginTop: 16 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+            <div>
+              <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 2 }}>
+                {lang === "de" ? "Bild-Analyse Prompt" : "Image analysis prompt"}
+              </div>
+              <div style={{ fontSize: 11, color: "var(--muted)" }}>
+                {lang === "de"
+                  ? "Dieser Prompt wird bei jedem Bild-Upload an GPT-4o mini gesendet."
+                  : "This prompt is sent to GPT-4o mini with each image upload."}
+              </div>
+            </div>
+            <button
+              onClick={() => setAiPromptDraft(DEFAULT_AI_PROMPT)}
+              title={lang === "de" ? "Auf Standard zurücksetzen" : "Reset to default"}
+              style={{ all: "unset", cursor: "pointer", fontSize: 11, color: "var(--muted)", textDecoration: "underline", flexShrink: 0 }}
+            >
+              {lang === "de" ? "Zurücksetzen" : "Reset"}
+            </button>
+          </div>
+          <textarea
+            value={aiPromptDraft}
+            onChange={e => setAiPromptDraft(e.target.value)}
+            rows={5}
+            style={{ width: "100%", border: "1px solid var(--line-strong)", borderRadius: 4, padding: "10px 12px", background: "var(--bg)", color: "var(--fg)", resize: "vertical", outline: "none", fontFamily: "var(--font-sans)", fontSize: 13, lineHeight: 1.6, boxSizing: "border-box" }}
+          />
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 10 }}>
+            <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--muted)" }}>
+              {promptSavedMsg
+                ? <span style={{ color: "oklch(0.52 0.17 145)" }}>✓ {lang === "de" ? "Gespeichert" : "Saved"}</span>
+                : aiPromptDraft !== aiPrompt
+                  ? <span style={{ color: "oklch(0.55 0.14 70)" }}>● {lang === "de" ? "Ungespeichert" : "Unsaved"}</span>
+                  : <span style={{ color: "var(--faint)" }}>gpt-4o-mini · detail: low</span>
+              }
+            </div>
+            <button
+              onClick={savePrompt}
+              disabled={aiPromptDraft === aiPrompt || promptSaving}
+              style={{
+                all: "unset", cursor: aiPromptDraft !== aiPrompt && !promptSaving ? "pointer" : "not-allowed",
+                padding: "8px 18px", background: "var(--fg)", color: "var(--bg)", fontSize: 13, fontWeight: 500,
+                opacity: aiPromptDraft !== aiPrompt && !promptSaving ? 1 : 0.35,
+              }}
+            >
+              {promptSaving ? (lang === "de" ? "Speichert…" : "Saving…") : (lang === "de" ? "Speichern" : "Save")}
+            </button>
+          </div>
         </div>
       </section>
 

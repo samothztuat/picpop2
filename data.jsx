@@ -54,7 +54,8 @@ const I18N = {
     author: "Urheber",
     tags: "Tags",
     notes: "Notizen",
-    date_taken: "Aufnahmedatum",
+    date_taken: "Uploaddatum",
+    ai_description: "KI-Beschreibung",
     format: "Format",
     resolution: "Auflösung",
     used_in: "Verwendet in",
@@ -194,7 +195,8 @@ const I18N = {
     author: "Author",
     tags: "Tags",
     notes: "Notes",
-    date_taken: "Date taken",
+    date_taken: "Upload date",
+    ai_description: "AI description",
     format: "Format",
     resolution: "Resolution",
     used_in: "Used in",
@@ -305,11 +307,6 @@ const TAGS = [
   { id: "t-med-broschuere", name: "Broschüre",         name_en: "Brochure",           hue: 170, category: "medium",   area: "print" },
   { id: "t-med-gb",         name: "Geschäftsbericht",  name_en: "Annual report",      hue: 60,  category: "medium",   area: "print" },
   { id: "t-med-plakat",     name: "Plakat / Poster",   name_en: "Poster",             hue: 0,   category: "medium",   area: "print" },
-  // Print-Bereich: Kategorie Kampagne
-  { id: "t-kmp-fj25",       name: "Frühjahr 2025",     name_en: "Spring 2025",        hue: 90,  category: "kampagne", area: "print" },
-  { id: "t-kmp-so25",       name: "Sommer 2025",       name_en: "Summer 2025",        hue: 50,  category: "kampagne", area: "print" },
-  { id: "t-kmp-hb25",       name: "Herbst 2025",       name_en: "Autumn 2025",        hue: 25,  category: "kampagne", area: "print" },
-  { id: "t-kmp-fj26",       name: "Frühjahr 2026",     name_en: "Spring 2026",        hue: 130, category: "kampagne", area: "print" },
 ];
 
 const TEAM = [

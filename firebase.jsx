@@ -13,6 +13,52 @@ firebase.initializeApp(FIREBASE_CONFIG);
 const db = firebase.firestore();
 const storage = firebase.storage();
 
+// ── AI config cache (loaded once from Firestore settings/global) ──────────────
+window.AI_CONFIG = window.AI_CONFIG || { openaiKey: "", prompt: "" };
+
+async function loadAiConfig() {
+  try {
+    const snap = await db.doc("settings/global").get();
+    if (snap.exists) {
+      const d = snap.data();
+      window.AI_CONFIG.openaiKey = (d.llmProviderKeys || {}).openai || "";
+      window.AI_CONFIG.prompt    = d.aiPrompt || window.AI_DEFAULT_PROMPT || "";
+    }
+  } catch (e) {
+    console.warn("[loadAiConfig]", e.message);
+  }
+}
+
+// ── OpenAI Vision: describe one image ────────────────────────────────────────
+async function describeImageWithAI(imageUrl) {
+  const key    = window.AI_CONFIG.openaiKey;
+  const prompt = window.AI_CONFIG.prompt || window.AI_DEFAULT_PROMPT || "";
+  if (!key || !imageUrl) return null;
+  try {
+    const res = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${key}` },
+      body: JSON.stringify({
+        model: "gpt-4o-mini",
+        max_tokens: 300,
+        messages: [{
+          role: "user",
+          content: [
+            { type: "text",      text: prompt },
+            { type: "image_url", image_url: { url: imageUrl, detail: "low" } },
+          ],
+        }],
+      }),
+    });
+    if (!res.ok) { console.warn("[describeImage] HTTP", res.status); return null; }
+    const data = await res.json();
+    return data.choices?.[0]?.message?.content?.trim() || null;
+  } catch (e) {
+    console.warn("[describeImage]", e.message);
+    return null;
+  }
+}
+
 // Batch-write helper (Firestore limit: 500 ops per batch)
 async function writeBatch(collection, docs) {
   for (let i = 0; i < docs.length; i += 400) {
@@ -200,6 +246,7 @@ async function uploadAsset(file, folderId, tags = [], onProgress = null, author 
 
   let width = 0, height = 0, ratio = 1.5;
   let pages = 1;
+  let widthMm = null, heightMm = null;
   let thumbnailUrl = null;
 
   if (isPdf) {
@@ -215,6 +262,10 @@ async function uploadAsset(file, folderId, tags = [], onProgress = null, author 
         pages = pdfDoc.numPages;
         const page = await pdfDoc.getPage(1);
         const vp   = page.getViewport({ scale: 1 });
+        // Physical dimensions: PDF points → mm (1 pt = 25.4/72 mm)
+        const toMm = pt => Math.round(pt * 25.4 / 72);
+        widthMm  = toMm(vp.width);
+        heightMm = toMm(vp.height);
         ratio = vp.width / vp.height || 0.71;
 
         // Render first page: scale so the LONGEST side = 1400 px
@@ -247,6 +298,15 @@ async function uploadAsset(file, folderId, tags = [], onProgress = null, author 
     });
   }
 
+  // KI-Beschreibung für Bilder — Key nachladen falls noch nicht im Cache
+  let aiDescription = "";
+  if (!isPdf && storageUrl) {
+    if (!window.AI_CONFIG?.openaiKey) await loadAiConfig();
+    if (window.AI_CONFIG?.openaiKey) {
+      aiDescription = (await describeImageWithAI(storageUrl)) || "";
+    }
+  }
+
   const asset = {
     id,
     title: file.name.replace(/\.[^.]+$/, ""),
@@ -264,9 +324,10 @@ async function uploadAsset(file, folderId, tags = [], onProgress = null, author 
     hue: Math.floor(Math.random() * 360),
     ratio,
     notes: "",
+    aiDescription,
     campaign: "",
     embargo: null,
-    ...(isPdf ? { pages } : { width, height }),
+    ...(isPdf ? { pages, ...(widthMm ? { widthMm, heightMm } : {}) } : { width, height }),
   };
 
   await db.collection("assets").doc(id).set(asset);
@@ -276,6 +337,8 @@ async function uploadAsset(file, folderId, tags = [], onProgress = null, author 
 Object.assign(window, {
   db,
   storage,
+  loadAiConfig,
+  describeImageWithAI,
   seedIfEmpty,
   seedPrintTags,
   subscribeToFolders,

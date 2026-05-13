@@ -420,7 +420,7 @@ function Toast({ msg, onDone }) {
 }
 
 // Modal shell
-function Modal({ open, onClose, children, width = 720, padding = 0, overflow = "auto" }) {
+function Modal({ open, onClose, children, width = 720, padding = 0, overflow = "auto", closeOnBackdrop = true }) {
   useEffect(() => {
     if (!open) return;
     const fn = (e) => { if (e.key === "Escape") onClose(); };
@@ -429,7 +429,7 @@ function Modal({ open, onClose, children, width = 720, padding = 0, overflow = "
   }, [open, onClose]);
   if (!open) return null;
   return (
-    <div className="scrim" onClick={onClose}>
+    <div className="scrim" onClick={closeOnBackdrop ? onClose : undefined}>
       <div className="modal" style={{ width, maxWidth: "92vw", maxHeight: "92vh", overflow, padding }} onClick={(e) => e.stopPropagation()}>
         {children}
       </div>

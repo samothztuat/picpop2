@@ -190,7 +190,7 @@ function Sidebar({ area, setArea, folders, route, setRoute, lang, onUpload, onCr
         <div className="nav-item" onClick={() => setRoute("all")} data-active={baseRoute === "all"}>
           <window.Icon.grid size={13} />
           <span>{area === "print" ? t("nav_all_pdfs") : t("nav_all_images")}</span>
-          <span className="count num">{window.ASSETS.filter(a => area === "print" ? a.kind === "pdf" : a.kind !== "pdf").length}</span>
+          <span className="count num">{assets.filter(a => area === "print" ? a.kind === "pdf" : a.kind !== "pdf").length}</span>
         </div>
 
         {/* Folder section */}
@@ -402,9 +402,10 @@ function App() {
   }
 
   // Mutable state — driven by Firestore snapshots after init
-  const [imageFolders, setImageFolders] = useStateA(window.FOLDERS);
-  const [pdfFolders, setPdfFolders] = useStateA(window.PDF_FOLDERS);
-  const [assets, setAssets] = useStateA(window.ASSETS);
+  // Start with empty arrays so mock data never flashes before real data loads
+  const [imageFolders, setImageFolders] = useStateA([]);
+  const [pdfFolders, setPdfFolders] = useStateA([]);
+  const [assets, setAssets] = useStateA([]);
   const [tags, setTags] = useStateA(window.TAGS);
   const [team, setTeam] = useStateA(window.TEAM);
   const [dbReady, setDbReady] = useStateA(false);
@@ -418,6 +419,9 @@ function App() {
 
   // Firestore: seed on first load, then subscribe to live updates
   useEffectA(() => {
+    // Load AI config so uploadAsset can use the OpenAI key immediately
+    window.loadAiConfig?.();
+
     let unsubFolders, unsubPdfs, unsubAssets, unsubTags, unsubTeam;
     window.seedIfEmpty()
       .then(() => {
@@ -669,31 +673,36 @@ function App() {
           <div className="main">
             <Topbar lang={lang} setLang={setLang} theme={theme} setTheme={setTheme} query={query} setQuery={setQuery} route={route} area={area} currentFolderName={currentFolder?.name} />
             <div className="content scroll">
-              {baseRoute === "recent" && (
+              {!dbReady && (
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "60vh" }}>
+                  <div style={{ width: 28, height: 28, border: "2.5px solid var(--line-strong)", borderTopColor: "var(--accent)", borderRadius: "50%", animation: "spin 0.7s linear infinite" }} />
+                </div>
+              )}
+              {dbReady && baseRoute === "recent" && (
                 <window.RecentView area={area} assets={assets} folders={imageFolders} pdfFolders={pdfFolders} onOpenFolder={openFolder} onOpenAsset={(a) => setOpenAsset(a)} onShareTarget={setShareTarget} onDeleteAssets={deleteAssets} onBulkAddTag={bulkAddTag} onBulkSetAuthor={bulkSetAuthor} onBulkMoveAssets={bulkMoveAssets} lang={lang} />
               )}
-              {baseRoute === "favorites" && (
+              {dbReady && baseRoute === "favorites" && (
                 <window.FavoritesView assets={assets} area={area} lang={lang} onOpenAsset={(a) => setOpenAsset(a)} onOpenFolder={openFolder} onShareTarget={setShareTarget} query={query} onDeleteAssets={deleteAssets} onBulkAddTag={bulkAddTag} onBulkSetAuthor={bulkSetAuthor} onBulkMoveAssets={bulkMoveAssets} imageFolders={imageFolders} pdfFolders={pdfFolders} />
               )}
-              {baseRoute === "uploads" && (
+              {dbReady && baseRoute === "uploads" && (
                 <window.RecentUploadsView assets={assets} area={area} lang={lang} onOpenAsset={(a) => setOpenAsset(a)} onOpenFolder={openFolder} onShareTarget={setShareTarget} onDeleteAssets={deleteAssets} onBulkAddTag={bulkAddTag} onBulkSetAuthor={bulkSetAuthor} onBulkMoveAssets={bulkMoveAssets} imageFolders={imageFolders} pdfFolders={pdfFolders} />
               )}
-              {baseRoute === "all" && (
+              {dbReady && baseRoute === "all" && (
                 <window.AllAssetsView assets={assets} area={area} lang={lang} onOpenAsset={(a) => setOpenAsset(a)} onShareTarget={setShareTarget} query={query} onDeleteAssets={deleteAssets} onBulkAddTag={bulkAddTag} onBulkSetAuthor={bulkSetAuthor} onBulkMoveAssets={bulkMoveAssets} imageFolders={imageFolders} pdfFolders={pdfFolders} />
               )}
-              {baseRoute === "folders" && !detailId && (
+              {dbReady && baseRoute === "folders" && !detailId && (
                 <window.FoldersView folders={imageFolders} kind="image" lang={lang} onOpenFolder={openFolder} onCreateNew={() => setUploadOpen(true)} onMoveAssets={bulkMoveAssets} />
               )}
-              {baseRoute === "folders" && currentFolder && (
+              {dbReady && baseRoute === "folders" && currentFolder && (
                 <window.FolderDetailView assets={assets} folder={currentFolder} kind="image" lang={lang} onBack={() => setRoute("folders")} onOpenAsset={(a) => setOpenAsset(a)} onShareTarget={setShareTarget} onUpload={() => setUploadOpen(true)} onDeleteAssets={deleteAssets} onBulkAddTag={bulkAddTag} onBulkSetAuthor={bulkSetAuthor} onBulkMoveAssets={bulkMoveAssets} imageFolders={imageFolders} pdfFolders={pdfFolders} />
               )}
-              {baseRoute === "pdfs" && !detailId && (
+              {dbReady && baseRoute === "pdfs" && !detailId && (
                 <window.FoldersView folders={pdfFolders} kind="pdf" lang={lang} onOpenFolder={openFolder} onCreateNew={() => setUploadOpen(true)} onMoveAssets={bulkMoveAssets} />
               )}
-              {baseRoute === "pdfs" && currentFolder && (
+              {dbReady && baseRoute === "pdfs" && currentFolder && (
                 <window.FolderDetailView assets={assets} folder={currentFolder} kind="pdf" lang={lang} onBack={() => setRoute("pdfs")} onOpenAsset={(a) => setOpenAsset(a)} onShareTarget={setShareTarget} onUpload={() => setUploadOpen(true)} onDeleteAssets={deleteAssets} onBulkAddTag={bulkAddTag} onBulkSetAuthor={bulkSetAuthor} onBulkMoveAssets={bulkMoveAssets} imageFolders={imageFolders} pdfFolders={pdfFolders} />
               )}
-              {baseRoute === "tags" && <window.TagsView assets={assets} tags={tags} onSaveTag={saveTag} onDeleteTag={deleteTag} onOpenAsset={(a) => setOpenAsset(a)} lang={lang} />}
+              {dbReady && baseRoute === "tags" && <window.TagsView assets={assets} tags={tags} onSaveTag={saveTag} onDeleteTag={deleteTag} onOpenAsset={(a) => setOpenAsset(a)} lang={lang} />}
               {baseRoute === "shared" && <window.SharedView onOpenShare={() => setRoute("external")} lang={lang} />}
               {baseRoute === "dev" && <window.AdminView lang={lang} />}
               {baseRoute === "settings" && <window.SettingsView lang={lang} setLang={setLang} theme={theme} setTheme={setTheme} density={density} setDensity={setDensity} team={team} onSaveTeamMember={saveTeamMember} onDeleteTeamMember={deleteTeamMember} tags={tags} onSaveTag={saveTag} onDeleteTag={deleteTag} />}

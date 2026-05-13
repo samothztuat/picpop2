@@ -16,13 +16,24 @@ function AssetDetailModal({ open, asset, peerAssets, onNavigate, onClose, onShar
   const [newTagName, setNewTagName] = useStateM("");
   const newTagInputRef = useRefM(null);
   const titleInputRef  = useRefM(null);
+  // PDF dimensions — from Firestore fields (set during upload) or null
+  const [pdfDims, setPdfDims] = useStateM(null);
+  // AI description
+  const [aiDesc, setAiDesc] = useStateM(asset?.aiDescription ?? "");
 
   // Sync local state whenever the opened asset changes
   useEffectM(() => {
     if (!asset) return;
     setTags(asset.tags); setNotes(asset.notes || ""); setTitle(asset.title);
+    setAiDesc(asset.aiDescription || "");
     setShowTagPicker(false); setShowAuthorPicker(false);
     setNewTagName(""); setDownloadRes(0);
+    // Read dimensions from Firestore fields (stored during upload)
+    if (asset?.widthMm && asset?.heightMm) {
+      setPdfDims({ w: asset.widthMm, h: asset.heightMm });
+    } else {
+      setPdfDims(null);
+    }
   }, [asset?.id]);
 
   // Focus input when picker opens
@@ -191,7 +202,7 @@ function AssetDetailModal({ open, asset, peerAssets, onNavigate, onClose, onShar
       {/* Fixed height grid so both preview column and sidebar can use height:100% */}
       <div style={{
         display: "grid", gridTemplateColumns: "1.4fr 1fr",
-        height: "min(95vh, 1296px)",
+        height: "min(90vh, 1296px)",
       }}>
         {/* Preview — always fills column, content-fit via contain / iframe */}
         <div style={{
@@ -281,6 +292,12 @@ function AssetDetailModal({ open, asset, peerAssets, onNavigate, onClose, onShar
               <span>{window.fmtDate(asset.date, lang)}</span>
               <span>·</span>
               <span className="num">{asset.kind === "pdf" ? `${asset.pages} ${t("pdf_pages",{n:asset.pages}).split(" ")[1]} · ${asset.size} MB` : `${asset.width}×${asset.height}`}</span>
+              {asset.kind === "pdf" && pdfDims && (
+                <>
+                  <span>·</span>
+                  <span className="num" title={lang === "de" ? "Seitenformat" : "Page size"}>{pdfDims.w} × {pdfDims.h} mm</span>
+                </>
+              )}
               <span>·</span>
               <span>{asset.format}</span>
             </div>
@@ -421,6 +438,44 @@ function AssetDetailModal({ open, asset, peerAssets, onNavigate, onClose, onShar
               )}
             </div>
 
+            {/* KI-Beschreibung — nur für Bilder */}
+            {asset.kind !== "pdf" && (
+              <div style={{ marginBottom: 16 }}>
+                <div className="row" style={{ gap: 6, marginBottom: 8, alignItems: "center" }}>
+                  <div className="eyebrow" style={{ marginBottom: 0 }}>{t("ai_description")}</div>
+                  <span style={{ fontSize: 10, fontWeight: 600, letterSpacing: "0.05em", padding: "1px 6px", background: "oklch(52% 0.17 145 / 0.1)", color: "oklch(40% 0.15 145)", border: "1px solid oklch(52% 0.17 145 / 0.2)", borderRadius: 3 }}>
+                    GPT-4o mini
+                  </span>
+                  {window.AI_CONFIG?.openaiKey && !aiDesc && (
+                    <button
+                      className="btn sm ghost"
+                      style={{ marginLeft: "auto", fontSize: 11 }}
+                      onClick={async () => {
+                        if (!asset.storageUrl) return;
+                        const desc = await window.describeImageWithAI?.(asset.storageUrl);
+                        if (desc) { setAiDesc(desc); save({ aiDescription: desc }); }
+                      }}
+                      title={lang === "de" ? "KI-Beschreibung jetzt generieren" : "Generate AI description now"}
+                    >
+                      ✦ {lang === "de" ? "Generieren" : "Generate"}
+                    </button>
+                  )}
+                </div>
+                <textarea
+                  value={aiDesc}
+                  onChange={e => setAiDesc(e.target.value)}
+                  onBlur={() => save({ aiDescription: aiDesc })}
+                  placeholder={
+                    window.AI_CONFIG?.openaiKey
+                      ? (lang === "de" ? "KI-Beschreibung wird beim nächsten Upload generiert…" : "AI description generated on next upload…")
+                      : (lang === "de" ? "OpenAI-Key in den Einstellungen hinterlegen" : "Add OpenAI key in settings")
+                  }
+                  rows={3}
+                  style={{ width: "100%", border: "1px solid var(--line)", borderRadius: 4, padding: 10, background: "var(--bg)", color: "var(--fg)", resize: "vertical", outline: "none", fontFamily: "inherit", fontSize: 13, lineHeight: 1.5 }}
+                />
+              </div>
+            )}
+
             {/* Notes */}
             <div style={{ marginBottom: 16 }}>
               <div className="eyebrow" style={{ marginBottom: 8 }}>{t("notes")}</div>
@@ -442,7 +497,22 @@ function AssetDetailModal({ open, asset, peerAssets, onNavigate, onClose, onShar
               <span style={{ color: "var(--muted)" }}>{t("format")}</span>
               <span>{asset.format}</span>
               <span style={{ color: "var(--muted)" }}>{t("resolution")}</span>
-              <span className="num">{asset.kind === "pdf" ? `${asset.pages} pages` : `${asset.width} × ${asset.height}`}</span>
+              <span className="num">
+                {asset.kind === "pdf"
+                  ? `${asset.pages} ${asset.pages === 1 ? (lang === "de" ? "Seite" : "page") : (lang === "de" ? "Seiten" : "pages")}`
+                  : `${asset.width} × ${asset.height} px`}
+              </span>
+              {asset.kind === "pdf" && (
+                <>
+                  <span style={{ color: "var(--muted)" }}>{lang === "de" ? "Seitenformat" : "Page size"}</span>
+                  <span className="num">
+                    {pdfDims
+                      ? `${pdfDims.w} × ${pdfDims.h} mm`
+                      : <span style={{ color: "var(--faint)" }}>—</span>
+                    }
+                  </span>
+                </>
+              )}
               <span style={{ color: "var(--muted)" }}>{t("embargo")}</span>
               <span>{asset.embargo ? window.fmtDate(asset.embargo, lang) : t("no_embargo")}</span>
             </div>
@@ -592,11 +662,19 @@ function ShareDialog({ open, target, onClose, onShared, lang }) {
 // -------- UploadMeta — folder / author / tags sub-form --------
 function UploadMeta({ folder, setFolder, folderList, pdfFolder, setPdfFolder, hasPdfs, hasImages, author, setAuthor, tags, setTags, lang, t, area }) {
   const isPrintArea = area === "print";
-  const [newTagName, setNewTagName] = useStateM("");
-  const [showNew,    setShowNew]    = useStateM(false);
-  const newTagRef = useRefM(null);
+  const [newTagName,    setNewTagName]    = useStateM("");
+  const [showNew,       setShowNew]       = useStateM(false);
+  const [newFolderName, setNewFolderName] = useStateM("");
+  const [showNewFolder, setShowNewFolder] = useStateM(false);
+  const [newPdfFolderName, setNewPdfFolderName] = useStateM("");
+  const [showNewPdfFolder, setShowNewPdfFolder] = useStateM(false);
+  const newTagRef       = useRefM(null);
+  const newFolderRef    = useRefM(null);
+  const newPdfFolderRef = useRefM(null);
 
-  useEffectM(() => { if (showNew) setTimeout(() => newTagRef.current?.focus(), 50); }, [showNew]);
+  useEffectM(() => { if (showNew)       setTimeout(() => newTagRef.current?.focus(), 50); }, [showNew]);
+  useEffectM(() => { if (showNewFolder) setTimeout(() => newFolderRef.current?.focus(), 50); }, [showNewFolder]);
+  useEffectM(() => { if (showNewPdfFolder) setTimeout(() => newPdfFolderRef.current?.focus(), 50); }, [showNewPdfFolder]);
 
   function createTag() {
     const name = newTagName.trim();
@@ -607,6 +685,54 @@ function UploadMeta({ folder, setFolder, folderList, pdfFolder, setPdfFolder, ha
     window.TAGS = [...window.TAGS, tag];
     setTags(prev => [...prev, id]);
     setNewTagName(""); setShowNew(false);
+  }
+
+  function createFolder() {
+    const name = newFolderName.trim();
+    if (!name) return;
+    const id = "f-" + Date.now();
+    const hues = [25, 200, 290, 90, 140, 320];
+    const hue  = hues[Math.floor(Math.random() * hues.length)];
+    const f    = { id, name, hue, count: 0 };
+    window.dbSaveFolder(f);
+    window.FOLDERS = [...(window.FOLDERS || []), f];
+    setFolder(id);
+    setNewFolderName(""); setShowNewFolder(false);
+  }
+
+  function createPdfFolder() {
+    const name = newPdfFolderName.trim();
+    if (!name) return;
+    const id = "p-" + Date.now();
+    const hues = [25, 200, 290, 90, 140, 320];
+    const hue  = hues[Math.floor(Math.random() * hues.length)];
+    const f    = { id, name, hue, count: 0 };
+    window.dbSavePdfFolder(f);
+    window.PDF_FOLDERS = [...(window.PDF_FOLDERS || []), f];
+    setPdfFolder(id);
+    setNewPdfFolderName(""); setShowNewPdfFolder(false);
+  }
+
+  // Render helper (not a React component — avoids remount-on-rerender focus loss)
+  function renderNewFolderRow(value, setValue, onCreate, onCancel, inputRef) {
+    return (
+      <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+        <input
+          ref={inputRef}
+          value={value}
+          onChange={e => setValue(e.target.value)}
+          onKeyDown={e => { if (e.key === "Enter") onCreate(); if (e.key === "Escape") onCancel(); }}
+          placeholder={lang === "de" ? "Ordner-Name…" : "Folder name…"}
+          style={{ flex: 1, border: "1px solid var(--line-strong)", borderRadius: 4, padding: "6px 8px", background: "var(--panel)", color: "var(--fg)", fontSize: 12, outline: "none", fontFamily: "inherit" }}
+        />
+        <button onClick={onCreate} disabled={!value.trim()}
+          style={{ all: "unset", cursor: value.trim() ? "pointer" : "not-allowed", padding: "6px 10px", background: value.trim() ? "var(--fg)" : "var(--hover)", color: value.trim() ? "var(--bg)" : "var(--muted)", fontSize: 12, borderRadius: 4, fontFamily: "inherit", whiteSpace: "nowrap" }}>
+          {lang === "de" ? "Anlegen" : "Create"}
+        </button>
+        <button onClick={onCancel}
+          style={{ all: "unset", cursor: "pointer", padding: "6px 6px", color: "var(--muted)", fontSize: 12 }}>✕</button>
+      </div>
+    );
   }
 
   return (
@@ -629,18 +755,37 @@ function UploadMeta({ folder, setFolder, folderList, pdfFolder, setPdfFolder, ha
                 style={{ width: "100%", border: "1px solid var(--line-strong)", borderRadius: 4, padding: "8px 10px", background: "var(--panel)", color: "var(--fg)", outline: "none", fontSize: 13 }}>
                 {folderList.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
               </select>
+              {!showNewFolder
+                ? <span style={{ fontSize: 11, color: "var(--muted)", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 3, marginTop: 5 }}
+                    onClick={() => setShowNewFolder(true)}>
+                    <window.Icon.plus size={9} />{lang === "de" ? "Neuen Ordner anlegen" : "Create new folder"}
+                  </span>
+                : renderNewFolderRow(newFolderName, setNewFolderName, createFolder, () => { setShowNewFolder(false); setNewFolderName(""); }, newFolderRef)
+              }
             </div>
           )}
           {/* PDF folder: shown when queue has PDFs and we're not already in print area */}
           {hasPdfs && !isPrintArea && (
             <div>
-              <div className="eyebrow" style={{ marginBottom: 6 }}>
-                {lang === "de" ? "Ordner (PDFs · Print)" : "Folder (PDFs · Print)"}
+              <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
+                <div className="eyebrow" style={{ marginBottom: 0 }}>
+                  {lang === "de" ? "Druckbereich-Ordner" : "Print area folder"}
+                </div>
+                <span style={{ fontSize: 10, background: "rgba(251,191,36,0.15)", color: "#b45309", borderRadius: 3, padding: "1px 5px", fontWeight: 600 }}>
+                  PDF → Print
+                </span>
               </div>
               <select value={pdfFolder} onChange={(e) => setPdfFolder(e.target.value)}
                 style={{ width: "100%", border: "1px solid var(--line-strong)", borderRadius: 4, padding: "8px 10px", background: "var(--panel)", color: "var(--fg)", outline: "none", fontSize: 13 }}>
                 {(window.PDF_FOLDERS || []).map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
               </select>
+              {!showNewPdfFolder
+                ? <span style={{ fontSize: 11, color: "var(--muted)", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 3, marginTop: 5 }}
+                    onClick={() => setShowNewPdfFolder(true)}>
+                    <window.Icon.plus size={9} />{lang === "de" ? "Neuen Ordner anlegen" : "Create new folder"}
+                  </span>
+                : renderNewFolderRow(newPdfFolderName, setNewPdfFolderName, createPdfFolder, () => { setShowNewPdfFolder(false); setNewPdfFolderName(""); }, newPdfFolderRef)
+              }
             </div>
           )}
         </div>
@@ -663,11 +808,10 @@ function UploadMeta({ folder, setFolder, folderList, pdfFolder, setPdfFolder, ha
         </div>
       </div>
 
-      {/* Row 2: Tags — full width */}
+      {/* Row 2: Tags — full width, grouped by file type in queue */}
       <div>
         <div className="eyebrow" style={{ marginBottom: 6 }}>{t("apply_tags")}</div>
 
-        {/* Tag chips: flat for image area, grouped A/B for print area */}
         {(() => {
           const renderTagChip = (tg) => {
             const active = tags.includes(tg.id);
@@ -679,24 +823,48 @@ function UploadMeta({ folder, setFolder, folderList, pdfFolder, setPdfFolder, ha
               </span>
             );
           };
-          if (!isPrintArea) return (
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginBottom: 8 }}>
-              {window.TAGS.filter(tg => !tg.area).map(renderTagChip)}
-              {!showNew && (
-                <span className="chip" style={{ cursor: "pointer", color: "var(--muted)", borderStyle: "dashed" }} onClick={() => setShowNew(true)}>
-                  <window.Icon.plus size={10} /> {lang === "de" ? "Neuer Tag" : "New tag"}
-                </span>
-              )}
-            </div>
-          );
-          // Print area: Medium only
-          const mediumTags = window.TAGS.filter(tg => tg.category === "medium");
+
+          const imageTags   = window.TAGS.filter(tg => !tg.area);
+          const mediumTags  = window.TAGS.filter(tg => tg.category === "medium");
+
+          // Show image tags when images are present (or no PDFs at all)
+          const showImageTags = hasImages || (!hasPdfs && !isPrintArea);
+          // Show print tags when PDFs are present or we're in print area
+          const showPrintTags = hasPdfs || isPrintArea;
+
           return (
-            <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 8 }}>
-              {mediumTags.length > 0 && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 8 }}>
+
+              {/* Image tags */}
+              {showImageTags && (
                 <div>
-                  <div className="eyebrow" style={{ marginBottom: 5, fontSize: 10, color: "var(--muted)" }}>Medium</div>
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>{mediumTags.map(renderTagChip)}</div>
+                  {showPrintTags && (
+                    <div className="eyebrow" style={{ marginBottom: 5, fontSize: 10, color: "var(--muted)" }}>
+                      {lang === "de" ? "Bilder" : "Images"}
+                    </div>
+                  )}
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
+                    {imageTags.map(renderTagChip)}
+                    {!showNew && (
+                      <span className="chip" style={{ cursor: "pointer", color: "var(--muted)", borderStyle: "dashed" }} onClick={() => setShowNew(true)}>
+                        <window.Icon.plus size={10} /> {lang === "de" ? "Neuer Tag" : "New tag"}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Print tags (Medium + Kampagne) */}
+              {showPrintTags && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {mediumTags.length > 0 && (
+                    <div>
+                      <div className="eyebrow" style={{ marginBottom: 5, fontSize: 10, color: "var(--muted)" }}>
+                        {showImageTags ? "PDF — Medium" : "Medium"}
+                      </div>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>{mediumTags.map(renderTagChip)}</div>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -835,7 +1003,7 @@ function UploadModal({ open, onClose, defaultFolder, area, onUploaded, lang }) {
   const folderName = folderList.find(f => f.id === folder)?.name || "";
 
   return (
-    <window.Modal open={open} onClose={safeClose} width={720}>
+    <window.Modal open={open} onClose={safeClose} width={720} closeOnBackdrop={false}>
 
       {/* ── Header ── */}
       <div style={{ padding: "20px 24px", borderBottom: "1px solid var(--line)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>

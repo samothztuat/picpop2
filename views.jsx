@@ -263,7 +263,7 @@ function FolderDetailView({ assets: assetsProp, folder, onBack, onOpenAsset, onS
 
   const assets = useMemoV(() => {
     let xs = allAssets.filter(a => a.folderId === folder.id);
-    if (q) xs = xs.filter(a => a.title.toLowerCase().includes(q.toLowerCase()) || a.author.toLowerCase().includes(q.toLowerCase()));
+    if (q) xs = xs.filter(a => { const lq = q.toLowerCase(); return a.title.toLowerCase().includes(lq) || a.author.toLowerCase().includes(lq) || (a.notes||"").toLowerCase().includes(lq) || (a.aiDescription||"").toLowerCase().includes(lq); });
     if (filterTag) xs = xs.filter(a => a.tags.includes(filterTag));
     if (filterAuthor) xs = xs.filter(a => a.author === filterAuthor);
     if (sort === "date") xs = [...xs].sort((a,b) => (a.date < b.date ? 1 : -1));
@@ -549,7 +549,7 @@ function TagsView({ assets: assetsProp, tags: tagsProp, onSaveTag, onDeleteTag, 
             <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 4 }}>{lang === "de" ? "Name *" : "Name *"}</div>
             <input autoFocus value={newForm.name} onChange={e => setNewForm(f => ({ ...f, name: e.target.value }))}
               onKeyDown={e => { if (e.key === "Enter") commitCreate(); if (e.key === "Escape") setCreating(false); }}
-              placeholder={lang === "de" ? "Kampagne…" : "Campaign…"} style={{ width: "100%", border: "1px solid var(--line-strong)", borderRadius: 4, padding: "7px 10px", background: "var(--panel)", color: "var(--fg)", outline: "none", fontSize: 13 }} />
+              placeholder={lang === "de" ? "Tag-Name…" : "Tag name…"} style={{ width: "100%", border: "1px solid var(--line-strong)", borderRadius: 4, padding: "7px 10px", background: "var(--panel)", color: "var(--fg)", outline: "none", fontSize: 13 }} />
           </div>
           <div className="row" style={{ gap: 8, justifyContent: "flex-end" }}>
             <button className="btn ghost sm" onClick={() => setCreating(false)}>{t("cancel")}</button>
@@ -1066,7 +1066,7 @@ function AllAssetsView({ assets: assetsProp, area, lang, onOpenAsset, onShareTar
     let arr = all;
     if (query) {
       const q = query.toLowerCase();
-      arr = arr.filter(a => a.title.toLowerCase().includes(q) || a.author.toLowerCase().includes(q));
+      arr = arr.filter(a => a.title.toLowerCase().includes(q) || a.author.toLowerCase().includes(q) || (a.notes||"").toLowerCase().includes(q) || (a.aiDescription||"").toLowerCase().includes(q));
     }
     if (activeTag) arr = arr.filter(a => a.tags.includes(activeTag));
     if (activeAuthor) arr = arr.filter(a => a.author === activeAuthor);
@@ -1233,7 +1233,7 @@ function FavoritesView({ assets: assetsProp, area, lang, onOpenAsset, onOpenFold
     else xs = xs.filter(a => a.kind !== "pdf");
     if (query) {
       const q = query.toLowerCase();
-      xs = xs.filter(a => a.title.toLowerCase().includes(q) || a.author.toLowerCase().includes(q));
+      xs = xs.filter(a => a.title.toLowerCase().includes(q) || a.author.toLowerCase().includes(q) || (a.notes||"").toLowerCase().includes(q) || (a.aiDescription||"").toLowerCase().includes(q));
     }
     return [...xs].sort((a, b) => (a.date < b.date ? 1 : -1));
   }, [assets, favorites, area, query]);
