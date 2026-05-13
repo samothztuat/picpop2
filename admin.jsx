@@ -236,10 +236,10 @@ function TenantDetail({ tenant, onRefresh }) {
           </svg>
           Als Mandant anzeigen →
         </button>
-        <a href={`https://${tenant.id}.picpop.de`} target="_blank" rel="noopener"
+        <a href={`https://picpop-bilddatenbank.web.app/?t=${tenant.id}`} target="_blank" rel="noopener"
           style={{ display: "inline-flex", alignItems: "center", gap: 6, height: 32, padding: "0 12px", border: "1px solid var(--line-strong)", borderRadius: 3, fontSize: 12, color: "var(--fg)", textDecoration: "none", background: "var(--panel)" }}>
           <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-          {tenant.id}.picpop.de
+          In neuem Tab ↗
         </a>
       </div>
 
@@ -398,18 +398,25 @@ function TenantDetail({ tenant, onRefresh }) {
       </div>
 
       {/* Login-URL */}
-      <div style={{ marginTop: 28, padding: "12px 16px", background: "var(--hover)", borderRadius: 4, fontSize: 12, color: "var(--muted)", lineHeight: 1.8, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-        <span style={{ fontWeight: 600, color: "var(--fg-2)" }}>Kunden-URL:</span>
-        <a href={`https://${tenant.id}.picpop.de`} target="_blank" rel="noopener"
-          style={{ fontFamily: "var(--font-mono)", color: "var(--fg)", textDecoration: "none", borderBottom: "1px solid var(--line-strong)" }}>
-          https://{tenant.id}.picpop.de
-        </a>
-        <button
-          title="Kopieren"
-          onClick={() => { navigator.clipboard.writeText(`https://${tenant.id}.picpop.de`).catch(() => {}); }}
-          style={{ background: "none", border: "1px solid var(--line-strong)", borderRadius: 3, padding: "2px 8px", fontSize: 11, cursor: "pointer", color: "var(--muted)" }}>
-          Kopieren
-        </button>
+      <div style={{ marginTop: 28, padding: "14px 16px", background: "var(--hover)", borderRadius: 4, fontSize: 12, color: "var(--muted)", lineHeight: 1.8, display: "flex", flexDirection: "column", gap: 10 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <span style={{ fontWeight: 600, color: "var(--fg-2)", minWidth: 80 }}>Aktive URL:</span>
+          <a href={`https://picpop-bilddatenbank.web.app/?t=${tenant.id}`} target="_blank" rel="noopener"
+            style={{ fontFamily: "var(--font-mono)", color: "var(--fg)", textDecoration: "none", borderBottom: "1px solid var(--line-strong)" }}>
+            picpop-bilddatenbank.web.app/?t={tenant.id}
+          </a>
+          <button
+            title="Kopieren"
+            onClick={() => { navigator.clipboard.writeText(`https://picpop-bilddatenbank.web.app/?t=${tenant.id}`).catch(() => {}); }}
+            style={{ background: "none", border: "1px solid var(--line-strong)", borderRadius: 3, padding: "2px 8px", fontSize: 11, cursor: "pointer", color: "var(--muted)" }}>
+            Kopieren
+          </button>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", opacity: 0.55 }}>
+          <span style={{ fontWeight: 500, minWidth: 80 }}>Subdomain:</span>
+          <span style={{ fontFamily: "var(--font-mono)" }}>{tenant.id}.picpop.de</span>
+          <span style={{ fontSize: 10, fontFamily: "var(--font-mono)", background: "var(--line-strong)", padding: "1px 6px", borderRadius: 2 }}>DNS ausstehend</span>
+        </div>
       </div>
     </div>
   );
