@@ -133,7 +133,7 @@ function RecentView({ onOpenFolder, onOpenAsset, onShareTarget, onDeleteAssets, 
             <window.SectionHeader
               eyebrow={t("nav_recent")}
               title={lang === "de" ? "Zuletzt hinzugefügt" : "Recently added"}
-              right={<button className="btn sm ghost">{t("show_more")} <window.Icon.chevR size={12} /></button>}
+              right={null}
             />
             {selection.size > 0 && (
               <window.BulkBar
@@ -247,7 +247,10 @@ function RecentView({ onOpenFolder, onOpenAsset, onShareTarget, onDeleteAssets, 
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div className="clamp-1" style={{ fontSize: 12, fontWeight: 500 }}>{a.title}</div>
-                  <div className="mono" style={{ color: "var(--muted)", fontSize: 10 }}>{a.date}</div>
+                  <div className="mono" style={{ color: "var(--muted)", fontSize: 10, marginTop: 2 }}>
+                    {a.author && <span style={{ marginRight: 6 }}>{a.author}</span>}
+                    {a.date ? new Date(a.date).toLocaleDateString(lang === "de" ? "de-DE" : "en-US", { day: "2-digit", month: "short", year: "numeric" }) : ""}
+                  </div>
                 </div>
               </div>
             ))}
