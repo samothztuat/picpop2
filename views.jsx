@@ -375,8 +375,6 @@ function FolderDetailView({ assets: assetsProp, folder, onBack, onOpenAsset, onS
             <span className="num">{folder.count} {t("items")}</span>
             <span>·</span>
             <window.AvatarStack users={window.TEAM.slice(0, 4)} size={20} />
-            <span>·</span>
-            <span>{lang === "de" ? "Inhaberin" : "Owner"}: {window.userById(folder.owner)?.name || "Mira Köhler"}</span>
           </div>
         </div>
         <div className="row" style={{ gap: 8 }}>
