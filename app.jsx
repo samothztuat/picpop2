@@ -116,7 +116,7 @@ function FolderRow({ folder, active, onOpen, onRename, onDelete, onPin, onMoveAs
 }
 
 // ── Sidebar ──────────────────────────────────────────────────────────────────
-function Sidebar({ area, setArea, folders, route, setRoute, lang, onUpload, onCreateFolder, onRenameFolder, onDeleteFolder, onPinFolder, onReorderFolders, onMoveAssets, onDevOpen, assets }) {
+function Sidebar({ area, setArea, folders, route, setRoute, lang, onUpload, onCreateFolder, onRenameFolder, onDeleteFolder, onPinFolder, onReorderFolders, onMoveAssets, onDevOpen, assets, currentUser, onSignOut }) {
   const t = window.makeT(lang);
   const [creating, setCreating] = useStateA(false);
   const [newName, setNewName] = useStateA("");
@@ -281,13 +281,35 @@ function Sidebar({ area, setArea, folders, route, setRoute, lang, onUpload, onCr
           </svg>
           <span>Dev</span>
         </div>
-        {window.TEAM[0] && (
-          <div className="row" style={{ gap: 10, padding: "12px 10px", borderTop: "1px solid var(--line)", marginTop: 8 }}>
-            <window.Avatar user={window.TEAM[0]} size={28} />
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 13, fontWeight: 500 }} className="clamp-1">{window.TEAM[0].name}</div>
-              <div className="mono" style={{ color: "var(--muted)" }}>{window.TEAM[0].role}</div>
+        {currentUser && (
+          <div className="row" style={{ gap: 10, padding: "10px 10px 12px", borderTop: "1px solid var(--line)", marginTop: 8 }}>
+            <div style={{
+              width: 28, height: 28, borderRadius: "50%", background: "var(--line-strong)",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              fontWeight: 600, fontSize: 12, color: "var(--muted)", flexShrink: 0,
+            }}>
+              {(currentUser.email || "?")[0].toUpperCase()}
             </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 12, fontWeight: 500 }} className="clamp-1">
+                {currentUser.displayName || currentUser.email?.split("@")[0] || "Nutzer"}
+              </div>
+              <div className="mono" style={{ color: "var(--muted)", fontSize: 9 }}>
+                {window.TENANT_ID}
+              </div>
+            </div>
+            <button
+              className="btn icon ghost sm"
+              title={lang === "de" ? "Abmelden" : "Sign out"}
+              onClick={onSignOut}
+              style={{ flexShrink: 0, color: "var(--muted)" }}
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+                <polyline points="16 17 21 12 16 7"/>
+                <line x1="21" y1="12" x2="9" y2="12"/>
+              </svg>
+            </button>
           </div>
         )}
       </nav>
@@ -352,6 +374,9 @@ function App() {
   }/*EDITMODE-END*/;
 
   const [tweaks, setTweak] = window.useTweaks(TWEAK_DEFAULTS);
+
+  // ── Auth gate ─────────────────────────────────────────────────────────────
+  const { user, authReady, signOut } = window.useAuth();
 
   const [lang, setLangState] = useStateA(tweaks.lang);
   const [theme, setThemeState] = useStateA(tweaks.theme);
@@ -418,7 +443,15 @@ function App() {
   useEffectA(() => { window.TEAM = team; }, [team]);
 
   // Firestore: seed on first load, then subscribe to live updates
+  // Only runs when user is authenticated (user changes from null → object)
   useEffectA(() => {
+    if (!user) {
+      // Reset data state on logout
+      setDbReady(false);
+      setImageFolders([]); setPdfFolders([]); setAssets([]); setTags(window.TAGS); setTeam(window.TEAM);
+      return;
+    }
+
     // Load AI config so uploadAsset can use the OpenAI key immediately
     window.loadAiConfig?.();
 
@@ -444,7 +477,7 @@ function App() {
         setDbReady(true);
       });
     return () => { unsubFolders?.(); unsubPdfs?.(); unsubAssets?.(); unsubTags?.(); unsubTeam?.(); };
-  }, []);
+  }, [user]);
 
   const folders = area === "images" ? imageFolders : pdfFolders;
   const setFolders = area === "images" ? setImageFolders : setPdfFolders;
@@ -648,6 +681,18 @@ function App() {
   // expose favorites for sidebar count
   window.__favorites = favorites;
 
+  // ── Auth gate: show spinner / login before main app ───────────────────────
+  if (!authReady) {
+    return (
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "100vh", background: "var(--bg)" }}>
+        <div style={{ width: 28, height: 28, border: "2.5px solid var(--line-strong)", borderTopColor: "var(--accent)", borderRadius: "50%", animation: "spin 0.7s linear infinite" }} />
+      </div>
+    );
+  }
+  if (!user) {
+    return <window.LoginScreen tenantId={window.TENANT_ID} />;
+  }
+
   return (
     <window.LangCtx.Provider value={{ lang, setLang, t }}>
      <window.FavCtx.Provider value={{ favorites, toggleFavorite, bulkSetFavorite }}>
@@ -669,6 +714,8 @@ function App() {
             onPinFolder={pinFolder}
             onDevOpen={() => setDevOpen(true)}
             assets={assets}
+            currentUser={user}
+            onSignOut={signOut}
           />
           <div className="main">
             <Topbar lang={lang} setLang={setLang} theme={theme} setTheme={setTheme} query={query} setQuery={setQuery} route={route} area={area} currentFolderName={currentFolder?.name} />

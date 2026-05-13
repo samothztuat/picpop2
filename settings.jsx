@@ -167,7 +167,7 @@ function SettingsView({ lang, setLang, theme, setTheme, density, setDensity, tea
     try {
       const timer = new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), 6000));
       await Promise.race([
-        firebase.firestore().collection("assets").limit(1).get(),
+        window.tenantCol("assets").limit(1).get(),
         timer,
       ]);
       setDbStatus("connected");
@@ -180,7 +180,7 @@ function SettingsView({ lang, setLang, theme, setTheme, density, setDensity, tea
 
   /* ── LLM: load from Firestore ── */
   useEffectS(() => {
-    const unsub = firebase.firestore().doc("settings/global").onSnapshot(
+    const unsub = window.tenantSettingsDoc().onSnapshot(
       (snap) => {
         if (snap.exists) {
           const d = snap.data();
@@ -211,7 +211,7 @@ function SettingsView({ lang, setLang, theme, setTheme, density, setDensity, tea
     if (llmSaving) return;
     setLlmSaving(true);
     try {
-      await firebase.firestore().doc("settings/global").set(
+      await window.tenantSettingsDoc().set(
         { llmProviderKeys: keyDrafts, updatedAt: firebase.firestore.FieldValue.serverTimestamp() },
         { merge: true }
       );
@@ -233,7 +233,7 @@ function SettingsView({ lang, setLang, theme, setTheme, density, setDensity, tea
     setPromptSaving(true);
     try {
       const val = aiPromptDraft.trim() || DEFAULT_AI_PROMPT;
-      await firebase.firestore().doc("settings/global").set(
+      await window.tenantSettingsDoc().set(
         { aiPrompt: val, updatedAt: firebase.firestore.FieldValue.serverTimestamp() },
         { merge: true }
       );
@@ -317,7 +317,7 @@ function SettingsView({ lang, setLang, theme, setTheme, density, setDensity, tea
     setGhSaving(true);
     try {
       const val = { token: ghDraft.token.trim(), repo: ghDraft.repo.trim(), branch: ghDraft.branch.trim() || "main" };
-      await firebase.firestore().doc("settings/global").set(
+      await window.tenantSettingsDoc().set(
         { github: val, updatedAt: firebase.firestore.FieldValue.serverTimestamp() },
         { merge: true }
       );
@@ -337,13 +337,13 @@ function SettingsView({ lang, setLang, theme, setTheme, density, setDensity, tea
       const { repo, branch } = ghRef.current;
       const FILE = "picpop-snapshot.json";
 
-      // Collect current Firestore data
+      // Collect current Firestore data (tenant-scoped)
       const [fS, pfS, aS, tS, tmS] = await Promise.all([
-        window.db.collection("folders").get(),
-        window.db.collection("pdfFolders").get(),
-        window.db.collection("assets").get(),
-        window.db.collection("tags").get(),
-        window.db.collection("team").get(),
+        window.tenantCol("folders").get(),
+        window.tenantCol("pdfFolders").get(),
+        window.tenantCol("assets").get(),
+        window.tenantCol("tags").get(),
+        window.tenantCol("team").get(),
       ]);
       const snapshot = {
         version:    1,
@@ -387,12 +387,12 @@ function SettingsView({ lang, setLang, theme, setTheme, density, setDensity, tea
       const json     = fromBase64(fileData.content);
       const snap     = JSON.parse(json);
 
-      // Batch write helper
+      // Batch write helper (tenant-scoped)
       async function batchWrite(col, docs) {
         if (!docs || !docs.length) return;
         for (let i = 0; i < docs.length; i += 400) {
           const batch = window.db.batch();
-          docs.slice(i, i + 400).forEach(doc => batch.set(window.db.collection(col).doc(doc.id), doc));
+          docs.slice(i, i + 400).forEach(doc => batch.set(window.tenantCol(col).doc(doc.id), doc));
           await batch.commit();
         }
       }
@@ -1375,6 +1375,35 @@ function SettingsView({ lang, setLang, theme, setTheme, density, setDensity, tea
 
       {/* ══ 6 · App-Info ════════════════════════════════════════════════════ */}
       <section>
+        {/* ── Workspace / Tenant ───────────────────────────────────────────── */}
+        <section style={{ marginBottom: 56 }}>
+        <SectionLabel>{lang === "de" ? "Workspace" : "Workspace"}</SectionLabel>
+        <div style={{ background: "var(--panel)", border: "1px solid var(--line-strong)", borderRadius: 6, overflow: "hidden" }}>
+          <div style={{ padding: "18px 24px", display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 24, borderBottom: "1px solid var(--line)" }}>
+            <div>
+              <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, textTransform: "uppercase", letterSpacing: "0.1em", color: "var(--muted)", marginBottom: 6 }}>
+                {lang === "de" ? "Mandant (Tenant-ID)" : "Tenant ID"}
+              </div>
+              <div style={{ fontFamily: "var(--font-mono)", fontSize: 14, fontWeight: 600 }}>{window.TENANT_ID}</div>
+            </div>
+            <div>
+              <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, textTransform: "uppercase", letterSpacing: "0.1em", color: "var(--muted)", marginBottom: 6 }}>
+                {lang === "de" ? "Datenpfad (Firestore)" : "Data path (Firestore)"}
+              </div>
+              <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--fg-2)" }}>tenants/{window.TENANT_ID}/…</div>
+            </div>
+          </div>
+          <div style={{ padding: "14px 24px", background: "var(--hover)" }}>
+            <div style={{ fontSize: 12, color: "var(--muted)", lineHeight: 1.5 }}>
+              {lang === "de"
+                ? <>Der Workspace wird automatisch aus der Subdomain erkannt (<span style={{ fontFamily: "var(--font-mono)" }}>kunde.picpop.de</span>) oder kann per URL-Parameter überschrieben werden (<span style={{ fontFamily: "var(--font-mono)" }}>?t=kunde</span>). Alle Daten dieses Workspace sind vollständig isoliert.</>
+                : <>The workspace is detected automatically from the subdomain (<span style={{ fontFamily: "var(--font-mono)" }}>customer.picpop.de</span>) or can be overridden via URL parameter (<span style={{ fontFamily: "var(--font-mono)" }}>?t=customer</span>). All data in this workspace is fully isolated.</>
+              }
+            </div>
+          </div>
+        </div>
+        </section>
+
         <SectionLabel>{lang === "de" ? "App-Info" : "App info"}</SectionLabel>
         <div style={{ background: "var(--panel)", border: "1px solid var(--line-strong)" }}>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)" }}>

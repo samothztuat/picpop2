@@ -13,12 +13,39 @@ firebase.initializeApp(FIREBASE_CONFIG);
 const db = firebase.firestore();
 const storage = firebase.storage();
 
-// ── AI config cache (loaded once from Firestore settings/global) ──────────────
+// ── Tenant detection ──────────────────────────────────────────────────────────
+// Priority: ?t=xxx URL param  →  subdomain  →  "dev" (localhost fallback)
+(function detectTenantId() {
+  const param = new URLSearchParams(window.location.search).get("t");
+  if (param) { window.TENANT_ID = param; return; }
+
+  const host  = window.location.hostname;
+  const parts = host.split(".");
+  const skip  = ["www", "app", "picpop", "localhost", "127"];
+  if (parts.length >= 3 && !skip.includes(parts[0])) {
+    window.TENANT_ID = parts[0];
+    return;
+  }
+  window.TENANT_ID = "dev";
+})();
+
+// ── Tenant-aware Firestore helpers ────────────────────────────────────────────
+function tenantCol(name) {
+  return db.collection("tenants").doc(window.TENANT_ID).collection(name);
+}
+function tenantDoc(colName, docId) {
+  return tenantCol(colName).doc(docId);
+}
+function tenantSettingsDoc() {
+  return db.doc(`tenants/${window.TENANT_ID}/settings/global`);
+}
+
+// ── AI config cache (loaded once from Firestore tenants/{id}/settings/global) ─
 window.AI_CONFIG = window.AI_CONFIG || { openaiKey: "", prompt: "" };
 
 async function loadAiConfig() {
   try {
-    const snap = await db.doc("settings/global").get();
+    const snap = await tenantSettingsDoc().get();
     if (snap.exists) {
       const d = snap.data();
       window.AI_CONFIG.openaiKey = (d.llmProviderKeys || {}).openai || "";
@@ -64,7 +91,7 @@ async function writeBatch(collection, docs) {
   for (let i = 0; i < docs.length; i += 400) {
     const batch = db.batch();
     docs.slice(i, i + 400).forEach(doc => {
-      batch.set(db.collection(collection).doc(doc.id), doc);
+      batch.set(tenantCol(collection).doc(doc.id), doc);
     });
     await batch.commit();
   }
@@ -73,24 +100,24 @@ async function writeBatch(collection, docs) {
 // Ensure "Nicht zugeordnet" folders exist (idempotent migration)
 async function seedUnsortedFolders() {
   const [imgSnap, pdfSnap] = await Promise.all([
-    db.collection("folders").doc("f-unsorted").get(),
-    db.collection("pdfFolders").doc("p-unsorted").get(),
+    tenantCol("folders").doc("f-unsorted").get(),
+    tenantCol("pdfFolders").doc("p-unsorted").get(),
   ]);
   const ops = [];
   if (!imgSnap.exists) {
     const f = (window.FOLDERS || []).find(x => x.id === "f-unsorted");
-    if (f) ops.push(db.collection("folders").doc("f-unsorted").set(f));
+    if (f) ops.push(tenantCol("folders").doc("f-unsorted").set(f));
   }
   if (!pdfSnap.exists) {
     const f = (window.PDF_FOLDERS || []).find(x => x.id === "p-unsorted");
-    if (f) ops.push(db.collection("pdfFolders").doc("p-unsorted").set(f));
+    if (f) ops.push(tenantCol("pdfFolders").doc("p-unsorted").set(f));
   }
   if (ops.length) { await Promise.all(ops); console.log("✓ Nicht-zugeordnet folders seeded"); }
 }
 
-// Seed all mock data on first load if Firestore is empty
+// Seed all mock data on first load if Firestore is empty for this tenant
 async function seedIfEmpty() {
-  const probe = await db.collection("folders").limit(1).get();
+  const probe = await tenantCol("folders").limit(1).get();
   if (!probe.empty) {
     // DB already seeded — ensure new content exists
     await seedPrintTags();
@@ -106,12 +133,12 @@ async function seedIfEmpty() {
   await writeBatch("sharedLinks",window.SHARED_LINKS);
   await writeBatch("activity",   window.ACTIVITY);
 
-  console.log("✓ Firestore initial seed complete");
+  console.log(`✓ Firestore initial seed complete (tenant: ${window.TENANT_ID})`);
 }
 
 // Ensure print-specific tags exist in Firestore (idempotent migration)
 async function seedPrintTags() {
-  const snap = await db.collection("tags").where("area", "==", "print").limit(1).get();
+  const snap = await tenantCol("tags").where("area", "==", "print").limit(1).get();
   if (!snap.empty) return; // already present
   const printTags = (window.TAGS || []).filter(t => t.area === "print");
   if (printTags.length === 0) return;
@@ -122,16 +149,15 @@ async function seedPrintTags() {
 // ── Real-time subscriptions ───────────────────────────────────────────────────
 
 function subscribeToFolders(cb) {
-  return db.collection("folders").onSnapshot(snap => {
+  return tenantCol("folders").onSnapshot(snap => {
     const docs = snap.docs.map(d => d.data());
-    // preserve drag-drop order via sortOrder field if present
     docs.sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
     cb(docs);
   });
 }
 
 function subscribeToPdfFolders(cb) {
-  return db.collection("pdfFolders").onSnapshot(snap => {
+  return tenantCol("pdfFolders").onSnapshot(snap => {
     const docs = snap.docs.map(d => d.data());
     docs.sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
     cb(docs);
@@ -139,50 +165,50 @@ function subscribeToPdfFolders(cb) {
 }
 
 function subscribeToAssets(cb) {
-  return db.collection("assets").onSnapshot(snap => {
+  return tenantCol("assets").onSnapshot(snap => {
     cb(snap.docs.map(d => d.data()));
   });
 }
 
 function subscribeToActivity(cb) {
-  return db.collection("activity")
+  return tenantCol("activity")
     .orderBy("at", "desc")
     .onSnapshot(snap => cb(snap.docs.map(d => d.data())));
 }
 
 function subscribeToSharedLinks(cb) {
-  return db.collection("sharedLinks")
+  return tenantCol("sharedLinks")
     .onSnapshot(snap => cb(snap.docs.map(d => d.data())));
 }
 
 function subscribeToTags(cb) {
-  return db.collection("tags").onSnapshot(snap => cb(snap.docs.map(d => d.data())));
+  return tenantCol("tags").onSnapshot(snap => cb(snap.docs.map(d => d.data())));
 }
 
 function subscribeToTeam(cb) {
-  return db.collection("team").onSnapshot(snap => cb(snap.docs.map(d => d.data())));
+  return tenantCol("team").onSnapshot(snap => cb(snap.docs.map(d => d.data())));
 }
 
 // ── Write operations ──────────────────────────────────────────────────────────
 
 async function dbSaveAsset(asset) {
-  await db.collection("assets").doc(asset.id).set(asset);
+  await tenantCol("assets").doc(asset.id).set(asset);
 }
 
 async function dbDeleteAsset(asset) {
-  await db.collection("assets").doc(asset.id).delete();
+  await tenantCol("assets").doc(asset.id).delete();
   if (asset.storagePath) {
     try { await storage.ref(asset.storagePath).delete(); } catch (_) {}
   }
 }
 
 async function dbSaveFolder(folder) {
-  await db.collection("folders").doc(folder.id).set(folder);
+  await tenantCol("folders").doc(folder.id).set(folder);
 }
 
 async function dbDeleteFolder(id) {
-  await db.collection("folders").doc(id).delete();
-  const snap = await db.collection("assets").where("folderId", "==", id).get();
+  await tenantCol("folders").doc(id).delete();
+  const snap = await tenantCol("assets").where("folderId", "==", id).get();
   if (!snap.empty) {
     const batch = db.batch();
     snap.docs.forEach(d => batch.update(d.ref, { folderId: "f-unsorted" }));
@@ -191,12 +217,12 @@ async function dbDeleteFolder(id) {
 }
 
 async function dbSavePdfFolder(folder) {
-  await db.collection("pdfFolders").doc(folder.id).set(folder);
+  await tenantCol("pdfFolders").doc(folder.id).set(folder);
 }
 
 async function dbDeletePdfFolder(id) {
-  await db.collection("pdfFolders").doc(id).delete();
-  const snap = await db.collection("assets").where("folderId", "==", id).get();
+  await tenantCol("pdfFolders").doc(id).delete();
+  const snap = await tenantCol("assets").where("folderId", "==", id).get();
   if (!snap.empty) {
     const batch = db.batch();
     snap.docs.forEach(d => batch.update(d.ref, { folderId: "p-unsorted" }));
@@ -205,23 +231,23 @@ async function dbDeletePdfFolder(id) {
 }
 
 async function dbSaveTag(tag) {
-  await db.collection("tags").doc(tag.id).set(tag);
+  await tenantCol("tags").doc(tag.id).set(tag);
 }
 async function dbDeleteTag(id) {
-  await db.collection("tags").doc(id).delete();
+  await tenantCol("tags").doc(id).delete();
 }
 async function dbSaveTeamMember(member) {
-  await db.collection("team").doc(member.id).set(member);
+  await tenantCol("team").doc(member.id).set(member);
 }
 async function dbDeleteTeamMember(id) {
-  await db.collection("team").doc(id).delete();
+  await tenantCol("team").doc(id).delete();
 }
 
 async function dbReorderFolders(orderedIds, isPdf = false) {
   const col = isPdf ? "pdfFolders" : "folders";
   const batch = db.batch();
   orderedIds.forEach((id, i) => {
-    batch.update(db.collection(col).doc(id), { sortOrder: i });
+    batch.update(tenantCol(col).doc(id), { sortOrder: i });
   });
   await batch.commit();
 }
@@ -230,7 +256,7 @@ async function uploadAsset(file, folderId, tags = [], onProgress = null, author 
   const id = "a-" + Date.now() + "-" + Math.random().toString(36).slice(2, 6);
   const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
   const ext = file.name.split(".").pop().toLowerCase();
-  const storagePath = `assets/${id}/${file.name}`;
+  const storagePath = `tenants/${window.TENANT_ID}/assets/${id}/${file.name}`;
   const ref = storage.ref(storagePath);
 
   await new Promise((resolve, reject) => {
@@ -269,7 +295,6 @@ async function uploadAsset(file, folderId, tags = [], onProgress = null, author 
         ratio = vp.width / vp.height || 0.71;
 
         // Render first page: scale so the LONGEST side = 1400 px
-        // → crisp on 3× retina for tiles up to ~470 px CSS wide
         const THUMB_LONG = 1400;
         const thumbScale = THUMB_LONG / Math.max(vp.width, vp.height);
         const thumbVp    = page.getViewport({ scale: thumbScale });
@@ -280,7 +305,7 @@ async function uploadAsset(file, folderId, tags = [], onProgress = null, author 
 
         // Upload thumbnail to Firebase Storage
         const thumbBlob = await new Promise(res => canvas.toBlob(res, "image/jpeg", 0.90));
-        const thumbRef  = storage.ref(`thumbnails/${id}/thumb.jpg`);
+        const thumbRef  = storage.ref(`tenants/${window.TENANT_ID}/thumbnails/${id}/thumb.jpg`);
         await thumbRef.put(thumbBlob);
         thumbnailUrl = await thumbRef.getDownloadURL();
       } catch (e) {
@@ -330,13 +355,17 @@ async function uploadAsset(file, folderId, tags = [], onProgress = null, author 
     ...(isPdf ? { pages, ...(widthMm ? { widthMm, heightMm } : {}) } : { width, height }),
   };
 
-  await db.collection("assets").doc(id).set(asset);
+  await tenantCol("assets").doc(id).set(asset);
   return asset;
 }
 
 Object.assign(window, {
   db,
   storage,
+  TENANT_ID: window.TENANT_ID,
+  tenantCol,
+  tenantDoc,
+  tenantSettingsDoc,
   loadAiConfig,
   describeImageWithAI,
   seedIfEmpty,
