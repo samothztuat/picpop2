@@ -88,6 +88,54 @@ async function describeImageWithAI(imageUrl) {
   }
 }
 
+// ── PDF Text-Extraktion + KI-Analyse ─────────────────────────────────────────
+async function describePdfWithAI(pdfUrl) {
+  const key = window.AI_CONFIG.openaiKey;
+  if (!key || !pdfUrl || !window.pdfjsLib) return null;
+  try {
+    // 1. Text aus den ersten 3 Seiten mit PDF.js extrahieren
+    const pdfDoc = await window.pdfjsLib.getDocument({ url: pdfUrl, withCredentials: false }).promise;
+    const pageCount = Math.min(pdfDoc.numPages, 3);
+    let fullText = "";
+    for (let i = 1; i <= pageCount; i++) {
+      const page = await pdfDoc.getPage(i);
+      const content = await page.getTextContent();
+      // Zeilenwechsel herstellen (y-Position Sprünge)
+      let lastY = null;
+      const lines = [];
+      content.items.forEach(item => {
+        if (lastY !== null && Math.abs(item.transform[5] - lastY) > 2) lines.push("\n");
+        lines.push(item.str);
+        lastY = item.transform[5];
+      });
+      fullText += lines.join("") + "\n\n";
+    }
+    fullText = fullText.trim().slice(0, 4000); // max Tokens begrenzen
+    if (!fullText) return null;
+
+    // 2. GPT analysiert den Text
+    const sysPrompt = "Du analysierst den Textinhalt von Print-Dokumenten (Broschüren, Anzeigen, Flyer). Extrahiere Headlines, prägnante Begriffe und Kernaussagen. Antworte auf Deutsch in 2–3 kompakten Sätzen, die die wichtigsten Begriffe und das Thema des Dokuments wiedergeben. Keine Einleitung, direkt zur Sache.";
+    const res = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${key}` },
+      body: JSON.stringify({
+        model: "gpt-4o-mini",
+        max_tokens: 300,
+        messages: [
+          { role: "system", content: sysPrompt },
+          { role: "user",   content: `Dokument-Text:\n\n${fullText}` },
+        ],
+      }),
+    });
+    if (!res.ok) { console.warn("[describePdf] HTTP", res.status); return null; }
+    const data = await res.json();
+    return data.choices?.[0]?.message?.content?.trim() || null;
+  } catch (e) {
+    console.warn("[describePdf]", e.message);
+    return null;
+  }
+}
+
 // Batch-write helper (Firestore limit: 500 ops per batch)
 async function writeBatch(collection, docs) {
   for (let i = 0; i < docs.length; i += 400) {
@@ -515,12 +563,14 @@ async function uploadAsset(file, folderId, tags = [], onProgress = null, author 
     }
   }
 
-  // KI-Beschreibung für Bilder — Key nachladen falls noch nicht im Cache
+  // KI-Beschreibung — Bilder via Vision, PDFs via Text-Extraktion
   let aiDescription = "";
-  if (!isPdf && storageUrl) {
+  if (storageUrl) {
     if (!window.AI_CONFIG?.openaiKey) await loadAiConfig();
     if (window.AI_CONFIG?.openaiKey) {
-      aiDescription = (await describeImageWithAI(storageUrl)) || "";
+      aiDescription = isPdf
+        ? (await describePdfWithAI(storageUrl)) || ""
+        : (await describeImageWithAI(storageUrl)) || "";
     }
   }
 
@@ -576,6 +626,7 @@ Object.assign(window, {
   tenantSettingsDoc,
   loadAiConfig,
   describeImageWithAI,
+  describePdfWithAI,
   seedIfEmpty,
   seedPrintTags,
   migrateAssetUnassignedTags,

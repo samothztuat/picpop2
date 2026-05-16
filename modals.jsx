@@ -477,10 +477,11 @@ function AssetDetailModal({ open, asset: assetProp, peerAssets, onNavigate, onCl
                       style={{ marginLeft: "auto", fontSize: 11 }}
                       onClick={async () => {
                         if (!asset.storageUrl) return;
-                        const desc = await window.describeImageWithAI?.(asset.storageUrl);
+                        const fn = asset.kind === "pdf" ? window.describePdfWithAI : window.describeImageWithAI;
+                        const desc = await fn?.(asset.storageUrl);
                         if (desc) { setAiDesc(desc); save({ aiDescription: desc }); }
                       }}
-                      title={lang === "de" ? "KI-Beschreibung jetzt generieren" : "Generate AI description now"}
+                      title={lang === "de" ? (asset.kind === "pdf" ? "Text aus PDF extrahieren und analysieren" : "KI-Beschreibung jetzt generieren") : (asset.kind === "pdf" ? "Extract & analyse PDF text" : "Generate AI description now")}
                     >
                       ✦ {lang === "de" ? "Generieren" : "Generate"}
                     </button>
@@ -492,7 +493,9 @@ function AssetDetailModal({ open, asset: assetProp, peerAssets, onNavigate, onCl
                   onBlur={() => save({ aiDescription: aiDesc })}
                   placeholder={
                     window.AI_CONFIG?.openaiKey
-                      ? (lang === "de" ? "KI-Beschreibung wird beim nächsten Upload generiert…" : "AI description generated on next upload…")
+                      ? (asset.kind === "pdf"
+                          ? (lang === "de" ? "PDF-Text wird beim Upload analysiert…" : "PDF text analysed on upload…")
+                          : (lang === "de" ? "KI-Beschreibung wird beim nächsten Upload generiert…" : "AI description generated on next upload…"))
                       : (lang === "de" ? "OpenAI-Key in den Einstellungen hinterlegen" : "Add OpenAI key in settings")
                   }
                   rows={3}
