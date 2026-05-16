@@ -804,7 +804,7 @@ function Topbar({ lang, setLang, theme, setTheme, query, setQuery,
   }
 
   return (
-    <header className="topbar" style={{ flexDirection: "column", alignItems: "stretch", padding: 0, height: "auto" }}>
+    <header className="topbar" style={{ flexDirection: "column", alignItems: "stretch", padding: 0, height: "auto", position: "relative", zIndex: 30 }}>
       {/* Toolbar row */}
       <div style={{ display: "flex", alignItems: "center", gap: 16, padding: "0 24px", height: 56, flexShrink: 0 }}>
       {/* Search */}
