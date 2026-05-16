@@ -2,6 +2,41 @@
 
 const { useState: useStateA, useEffect: useEffectA, useMemo: useMemoA, useRef: useRefA } = React;
 
+// ── PicpopLogo ────────────────────────────────────────────────────────────────
+function PicpopLogo({ theme, iconOnly = false, height = 28 }) {
+  const dark  = theme === "dark" ? "#ffffff" : "#14120f";
+  const darkF = theme === "dark" ? "#ffffff" : "#1d1d1b";
+  const vb = iconOnly ? "0 0 146.75 146.75" : "0 0 581.02 146.75";
+  const w  = iconOnly ? height : Math.round(height * (581.02 / 146.75));
+  return (
+    <svg width={w} height={height} viewBox={vb} xmlns="http://www.w3.org/2000/svg" style={{ display: "block", flexShrink: 0 }}>
+      <clipPath id="pp-clip"><rect width="581.02" height="146.75"/></clipPath>
+      <g clipPath="url(#pp-clip)">
+        {/* Icon square background */}
+        <path fill={dark} d="M36.69,0h73.38C130.33,0,146.75,16.43,146.75,36.69v73.38c0,20.26-16.43,36.69-36.69,36.69H36.69c-20.26,0-36.69-16.43-36.69-36.69V36.69C0,16.43,16.43,0,36.69,0"/>
+        {/* Wheel segments */}
+        <path fill="#f05e69" d="M73.38,73.38l23.99-43.59c8.21,7.16,13.88,16.79,16.15,27.45l-40.13,16.15Z"/>
+        <path fill="#ebc745" d="M73.38,73.38l49.75-1.02c-2.09,10.69-7.6,20.42-15.7,27.71l-34.05-26.68Z"/>
+        <path fill="#5cc9a3" d="M73.38,73.38l25.76,42.57c-10.31,3.53-21.48,3.62-31.84.26l6.08-42.83Z"/>
+        <path fill="#598ceb" d="M73.38,73.38l-23.99,43.59c-8.21-7.16-13.88-16.79-16.15-27.45l40.13-16.15Z"/>
+        <path fill="#f05e69" d="M73.38,73.38l-49.75,1.02c2.09-10.69,7.6-20.42,15.7-27.71l34.05,26.68Z"/>
+        <path fill="#ebc745" d="M73.38,73.38l-25.76-42.57c10.31-3.53,21.48-3.62,31.84-.26l-6.08,42.83Z"/>
+        {/* Center circle */}
+        <path fill={darkF} d="M73.38,60.32c7.21,0,13.06,5.85,13.06,13.06s-5.85,13.06-13.06,13.06-13.06-5.85-13.06-13.06,5.85-13.06,13.06-13.06"/>
+        {/* Text — only rendered when not iconOnly */}
+        {!iconOnly && <>
+          <path fill={dark} d="M221.23,94.05c5.05,0,9.22-1.61,12.52-4.82,3.29-3.21,4.94-7.9,4.94-14.06v-1.28c0-6.17-1.67-10.85-5.01-14.06-3.34-3.21-7.49-4.82-12.46-4.82s-9.12,1.6-12.46,4.82c-3.34,3.21-5.01,7.89-5.01,14.06v1.28c0,6.17,1.67,10.85,5.01,14.06,3.34,3.21,7.49,4.82,12.46,4.82M187.84,132.06V42.69h15.92v7.71h2.31c1.46-2.48,3.72-4.69,6.81-6.61,3.08-1.93,7.49-2.89,13.23-2.89,5.14,0,9.89,1.26,14.25,3.79,4.36,2.53,7.87,6.23,10.53,11.11,2.65,4.88,3.98,10.79,3.98,17.72v2.05c0,6.93-1.33,12.84-3.98,17.72-2.65,4.88-6.16,8.58-10.53,11.11-4.37,2.52-9.12,3.79-14.25,3.79-3.85,0-7.08-.45-9.69-1.35-2.61-.9-4.71-2.06-6.29-3.47-1.58-1.41-2.85-2.84-3.79-4.3h-2.31v33h-16.18Z"/>
+          <path fill={dark} d="M264.63,42.69h16.18v63.69h-16.18v-63.69ZM272.72,35.24c-2.91,0-5.37-.94-7.38-2.82-2.01-1.88-3.02-4.37-3.02-7.45s1.01-5.56,3.02-7.45c2.01-1.88,4.47-2.83,7.38-2.83s5.48.95,7.45,2.83c1.97,1.88,2.95,4.37,2.95,7.45s-.98,5.56-2.95,7.45c-1.97,1.88-4.45,2.82-7.45,2.82"/>
+          <path fill={dark} d="M323.57,108.18c-6.16,0-11.75-1.28-16.76-3.85-5.01-2.57-8.97-6.29-11.88-11.17-2.91-4.88-4.37-10.79-4.37-17.72v-1.8c0-6.93,1.45-12.84,4.37-17.72,2.91-4.88,6.87-8.6,11.88-11.17,5.01-2.57,10.59-3.85,16.76-3.85s11.3,1.07,15.67,3.21c4.37,2.14,7.9,5.07,10.59,8.79,2.7,3.72,4.47,7.94,5.33,12.65l-15.67,3.34c-.35-2.57-1.11-4.88-2.31-6.93-1.2-2.06-2.89-3.68-5.07-4.88-2.18-1.2-4.9-1.8-8.15-1.8s-6.19.71-8.8,2.12c-2.61,1.41-4.67,3.51-6.16,6.29-1.5,2.78-2.25,6.18-2.25,10.21v1.28c0,4.03.75,7.43,2.25,10.21,1.5,2.78,3.55,4.88,6.16,6.29,2.61,1.41,5.54,2.12,8.8,2.12,4.88,0,8.58-1.26,11.11-3.79,2.52-2.53,4.13-5.85,4.82-9.95l15.67,3.72c-1.11,4.54-3.02,8.67-5.71,12.39-2.7,3.72-6.23,6.66-10.59,8.8-4.36,2.14-9.59,3.21-15.67,3.21"/>
+          <path fill={dark} d="M397.15,94.05c5.05,0,9.22-1.61,12.52-4.82,3.3-3.21,4.94-7.9,4.94-14.06v-1.28c0-6.17-1.67-10.85-5.01-14.06-3.34-3.21-7.49-4.82-12.46-4.82s-9.12,1.6-12.46,4.82c-3.34,3.21-5.01,7.89-5.01,14.06v1.28c0,6.17,1.67,10.85,5.01,14.06,3.34,3.21,7.49,4.82,12.46,4.82M363.76,132.06V42.69h15.92v7.71h2.31c1.45-2.48,3.72-4.69,6.8-6.61,3.08-1.93,7.49-2.89,13.23-2.89,5.14,0,9.89,1.26,14.26,3.79,4.37,2.53,7.87,6.23,10.53,11.11,2.65,4.88,3.98,10.79,3.98,17.72v2.05c0,6.93-1.33,12.84-3.98,17.72-2.65,4.88-6.16,8.58-10.53,11.11-4.37,2.52-9.12,3.79-14.26,3.79-3.85,0-7.08-.45-9.69-1.35-2.61-.9-4.71-2.06-6.29-3.47-1.59-1.41-2.85-2.84-3.79-4.3h-2.31v33h-16.18Z"/>
+          <path fill={dark} d="M470.85,93.79c4.96,0,9.07-1.6,12.33-4.81,3.25-3.21,4.88-7.81,4.88-13.81v-1.28c0-5.99-1.6-10.59-4.81-13.81-3.21-3.21-7.34-4.81-12.39-4.81s-9.08,1.61-12.33,4.81c-3.25,3.21-4.88,7.82-4.88,13.81v1.28c0,5.99,1.62,10.59,4.88,13.81,3.25,3.21,7.36,4.81,12.33,4.81M470.85,108.18c-6.34,0-12.03-1.28-17.08-3.85-5.05-2.57-9.03-6.29-11.94-11.17-2.91-4.88-4.37-10.74-4.37-17.59v-2.05c0-6.85,1.45-12.71,4.37-17.59,2.91-4.88,6.89-8.6,11.94-11.17,5.05-2.57,10.74-3.85,17.08-3.85s12.02,1.28,17.08,3.85c5.05,2.57,9.03,6.29,11.94,11.17,2.91,4.88,4.36,10.74,4.36,17.59v2.05c0,6.85-1.46,12.71-4.36,17.59-2.91,4.88-6.89,8.6-11.94,11.17-5.05,2.57-10.74,3.85-17.08,3.85"/>
+          <path fill={dark} d="M547.38,94.05c5.05,0,9.22-1.61,12.52-4.82,3.3-3.21,4.94-7.9,4.94-14.06v-1.28c0-6.17-1.67-10.85-5.01-14.06-3.34-3.21-7.49-4.82-12.46-4.82s-9.12,1.6-12.46,4.82c-3.34,3.21-5.01,7.89-5.01,14.06v1.28c0,6.17,1.67,10.85,5.01,14.06,3.34,3.21,7.49,4.82,12.46,4.82M513.99,132.06V42.69h15.92v7.71h2.31c1.46-2.48,3.73-4.69,6.81-6.61,3.08-1.93,7.49-2.89,13.22-2.89,5.14,0,9.89,1.26,14.26,3.79,4.36,2.53,7.87,6.23,10.53,11.11,2.65,4.88,3.98,10.79,3.98,17.72v2.05c0,6.93-1.33,12.84-3.98,17.72-2.65,4.88-6.16,8.58-10.53,11.11-4.37,2.52-9.12,3.79-14.26,3.79-3.85,0-7.08-.45-9.7-1.35-2.61-.9-4.71-2.06-6.29-3.47-1.59-1.41-2.85-2.84-3.79-4.3h-2.31v33h-16.18Z"/>
+        </>}
+      </g>
+    </svg>
+  );
+}
+
 // ── FolderRow ────────────────────────────────────────────────────────────────
 function FolderRow({ folder, active, onOpen, onRename, onDelete, onPin, onMoveAssets, onMoveFolder, allFolders, onDragStart, onDragOver, onDrop, dragOverHint, lang, liveCount, hasChildren, isExpanded, onToggleExpand }) {
   const t = window.makeT(lang);
@@ -253,7 +288,7 @@ function TagCollectionRow({ col, active, onClick, onRename, onDelete, lang }) {
 }
 
 // ── Sidebar ──────────────────────────────────────────────────────────────────
-function Sidebar({ area, setArea, folders, route, setRoute, lang, onUpload, onCreateFolder, onRenameFolder, onDeleteFolder, onPinFolder, onReorderFolders, onMoveAssets, onMoveAssetsToArea, onMoveFolder, onDevOpen, assets, currentUser, companyName, onSignOut, tagCollections, onLoadTagCollection, onDeleteTagCollection, onRenameTagCollection, activeTagColId, collapsed, onCollapse, onResize }) {
+function Sidebar({ area, setArea, folders, route, setRoute, lang, onUpload, onCreateFolder, onRenameFolder, onDeleteFolder, onPinFolder, onReorderFolders, onMoveAssets, onMoveAssetsToArea, onMoveFolder, onDevOpen, assets, currentUser, companyName, onSignOut, tagCollections, onLoadTagCollection, onDeleteTagCollection, onRenameTagCollection, activeTagColId, collapsed, onCollapse, onResize, theme }) {
   const t = window.makeT(lang);
   const [creating, setCreating] = useStateA(false);
   const [newName, setNewName] = useStateA("");
@@ -321,20 +356,17 @@ function Sidebar({ area, setArea, folders, route, setRoute, lang, onUpload, onCr
       {/* Brand */}
       {col ? (
         <div style={{ padding: "14px 0 10px", display: "flex", justifyContent: "center" }}>
-          <div
-            style={{ width: 28, height: 28, background: "var(--fg)", color: "var(--bg)", borderRadius: 4, display: "inline-flex", alignItems: "center", justifyContent: "center", fontFamily: "var(--font-mono)", fontWeight: 600, cursor: "pointer", flexShrink: 0 }}
-            onClick={() => onCollapse(false)}
-            title="picpop – aufklappen"
-          >p</div>
+          <div onClick={() => onCollapse(false)} title="picpop – aufklappen" style={{ cursor: "pointer" }}>
+            <PicpopLogo theme={theme} iconOnly height={28} />
+          </div>
         </div>
       ) : (
         <div style={{ padding: "16px 16px 12px" }}>
-          <div className="row" style={{ gap: 10 }}>
-            <div style={{ width: 28, height: 28, background: "var(--fg)", color: "var(--bg)", borderRadius: 4, display: "inline-flex", alignItems: "center", justifyContent: "center", fontFamily: "var(--font-mono)", fontWeight: 600 }}>p</div>
+          <div className="row" style={{ gap: 10, alignItems: "center" }}>
+            <PicpopLogo theme={theme} iconOnly={false} height={24} />
             <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontWeight: 600, fontSize: 14, letterSpacing: "-0.01em" }}>picpop</div>
               {(companyName || window.TENANT_ID) && (
-                <div className="mono" style={{ color: "var(--muted)", fontSize: 9 }}>{companyName || window.TENANT_ID}</div>
+                <div className="mono" style={{ color: "var(--muted)", fontSize: 9, marginTop: 2 }}>{companyName || window.TENANT_ID}</div>
               )}
             </div>
             {/* Collapse toggle */}
@@ -1484,6 +1516,7 @@ function App() {
             collapsed={sidebarCollapsed}
             onCollapse={setSidebarCollapsed}
             onResize={setSidebarWidth}
+            theme={theme}
           />
           <div className="main">
             <Topbar lang={lang} setLang={setLang} theme={theme} setTheme={setTheme} query={query} setQuery={setQuery} assets={assets} area={area} filterYear={filterYear} setFilterYear={setFilterYear} filterMonth={filterMonth} setFilterMonth={setFilterMonth} filterTags={filterTags} setFilterTags={setFilterTags} filterAuthor={filterAuthor} setFilterAuthor={setFilterAuthor} onClearFilters={clearFilters} onSaveFilters={saveTagCollection} />
