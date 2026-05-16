@@ -147,20 +147,12 @@ function tagBg(tag, dark) {
 
 // Returns asset.tags plus a virtual "Nicht zugeordnet" tag for each category
 // that has no real tag assigned yet. Never writes to DB — display only.
+// Once an asset has ANY real tag it is considered "assigned" and no virtual tags are added.
 function effectiveTags(asset) {
   const real = asset.tags || [];
+  if (real.length > 0) return real;   // ← has at least one tag → fully assigned
   const CATS = ["motiv", "kampagne", "medium"];
-  const virtual = [];
-  CATS.forEach(cat => {
-    const hasAny = real.some(tid => {
-      const tg = tagById(tid);
-      return tg && tg.category === cat;
-    });
-    if (!hasAny) {
-      const uid = `t-unassigned-${cat}`;
-      if (tagById(uid)) virtual.push(uid);
-    }
-  });
+  const virtual = CATS.map(cat => `t-unassigned-${cat}`).filter(uid => tagById(uid));
   return virtual.length ? [...real, ...virtual] : real;
 }
 window.effectiveTags = effectiveTags;
