@@ -266,6 +266,135 @@ function dpFmtDate(iso) {
   return d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: '2-digit' });
 }
 
+// ── KI-Batch Tab ──────────────────────────────────────────────────────────
+
+function KiBatchTab() {
+  const { useState: useStateKI, useRef: useRefKI } = React;
+  const [status, setStatus]     = useStateKI('idle'); // idle | running | done | error
+  const [log, setLog]           = useStateKI([]);
+  const [progress, setProgress] = useStateKI({ done: 0, total: 0, errors: 0 });
+  const stopRef                 = useRefKI(false);
+
+  function addLog(msg, type = 'info') {
+    setLog(prev => [...prev, { msg, type, ts: Date.now() }]);
+  }
+
+  async function runBatch() {
+    if (status === 'running') { stopRef.current = true; return; }
+    stopRef.current = false;
+    setLog([]);
+    setStatus('running');
+    setProgress({ done: 0, total: 0, errors: 0 });
+
+    try {
+      // 1. AI-Config laden
+      if (!window.AI_CONFIG?.openaiKey) await window.loadAiConfig();
+      if (!window.AI_CONFIG?.openaiKey) {
+        addLog('⚠ Kein OpenAI-Key gefunden. Bitte in den Einstellungen hinterlegen.', 'error');
+        setStatus('error');
+        return;
+      }
+      if (!window.pdfjsLib) {
+        addLog('⚠ PDF.js nicht geladen.', 'error');
+        setStatus('error');
+        return;
+      }
+
+      // 2. Alle PDF-Assets ohne aiDescription aus Firestore laden
+      addLog('Lade PDF-Assets aus Firestore…');
+      const snap = await window.tenantCol('assets')
+        .where('kind', '==', 'pdf')
+        .get();
+      const pdfs = snap.docs
+        .map(d => d.data())
+        .filter(a => !a.aiDescription && a.storageUrl);
+
+      addLog(`${pdfs.length} PDFs ohne KI-Beschreibung gefunden.`);
+      setProgress({ done: 0, total: pdfs.length, errors: 0 });
+
+      if (pdfs.length === 0) {
+        addLog('✓ Alle PDFs haben bereits eine KI-Beschreibung.', 'success');
+        setStatus('done');
+        return;
+      }
+
+      // 3. Batch verarbeiten
+      let done = 0, errors = 0;
+      for (const pdf of pdfs) {
+        if (stopRef.current) { addLog('— Abgebrochen.', 'warn'); break; }
+
+        const name = pdf.title || pdf.id;
+        addLog(`→ ${name}`);
+        try {
+          const desc = await window.describePdfWithAI(pdf.storageUrl);
+          if (desc) {
+            await window.tenantCol('assets').doc(pdf.id).update({ aiDescription: desc });
+            addLog(`  ✓ ${desc.slice(0, 80)}…`, 'success');
+          } else {
+            addLog(`  ○ Kein Text extrahierbar (leeres PDF?).`, 'warn');
+          }
+        } catch (e) {
+          errors++;
+          addLog(`  ✗ Fehler: ${e.message}`, 'error');
+        }
+        done++;
+        setProgress({ done, total: pdfs.length, errors });
+        // kurze Pause damit Rate-Limits nicht überschritten werden
+        await new Promise(r => setTimeout(r, 300));
+      }
+
+      addLog(`\nFertig: ${done} verarbeitet, ${errors} Fehler.`, done > 0 ? 'success' : 'warn');
+      setStatus('done');
+    } catch (e) {
+      addLog(`✗ Unerwarteter Fehler: ${e.message}`, 'error');
+      setStatus('error');
+    }
+  }
+
+  const colMap = { info: 'var(--fg-2)', success: '#5cc9a3', warn: '#ebc745', error: '#f05e69' };
+  const pct = progress.total > 0 ? Math.round((progress.done / progress.total) * 100) : 0;
+
+  return (
+    <div style={{ flex: 1, overflowY: 'auto', padding: '28px 32px', display: 'flex', flexDirection: 'column', gap: 20 }}>
+      <div>
+        <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 4 }}>KI-Beschreibungen für PDFs</div>
+        <div style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.6 }}>
+          Analysiert alle hochgeladenen PDFs ohne KI-Beschreibung. PDF.js extrahiert den Text (Seiten 1–3), GPT-4o-mini erkennt Headlines und Kernbegriffe.
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+        <button
+          className={'btn' + (status === 'running' ? ' ghost' : ' primary')}
+          onClick={runBatch}
+          style={{ minWidth: 140 }}
+        >
+          {status === 'running' ? '⏹ Stoppen' : '▶ Batch starten'}
+        </button>
+        {progress.total > 0 && (
+          <span style={{ fontSize: 12, color: 'var(--muted)', fontFamily: 'var(--font-mono)' }}>
+            {progress.done} / {progress.total} ({pct}%) · {progress.errors} Fehler
+          </span>
+        )}
+      </div>
+
+      {progress.total > 0 && (
+        <div style={{ height: 4, background: 'var(--line)', borderRadius: 2, overflow: 'hidden' }}>
+          <div style={{ height: '100%', width: pct + '%', background: progress.errors > 0 ? '#ebc745' : '#5cc9a3', transition: 'width 0.3s', borderRadius: 2 }} />
+        </div>
+      )}
+
+      {log.length > 0 && (
+        <div style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 6, padding: '12px 16px', fontFamily: 'var(--font-mono)', fontSize: 11, lineHeight: 1.7, maxHeight: 400, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 0 }}>
+          {log.map((l, i) => (
+            <div key={i} style={{ color: colMap[l.type] || 'var(--fg-2)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{l.msg}</div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Main DevPanel ──────────────────────────────────────────────────────────
 
 function DevPanel({ open, onClose }) {
@@ -632,6 +761,7 @@ function DevPanel({ open, onClose }) {
           <DPTab label="Neue Idee"    active={tab === 'new'}  onClick={() => setTab('new')} />
           <DPTab label="Übersicht"   active={tab === 'list'} count={openCount} onClick={() => setTab('list')} />
           <DPTab label="GitHub"      active={tab === 'git'}  onClick={() => setTab('git')} />
+          <DPTab label="KI-Batch"      active={tab === 'ki'}   onClick={() => setTab('ki')} />
           <DPTab label="Dokumentation" active={tab === 'docs'} onClick={() => setTab('docs')} />
         </div>
 
@@ -1017,6 +1147,9 @@ function DevPanel({ open, onClose }) {
             </div>
           </div>
         )}
+
+        {/* ── Tab: KI-Batch ── */}
+        {tab === 'ki' && <KiBatchTab />}
 
         {/* ── Tab: Dokumentation ── */}
         {tab === 'docs' && (
