@@ -271,7 +271,9 @@ function SettingsView({ lang, setLang, theme, setTheme, density, setDensity, tea
   // Encode UTF-8 string → base64 (handles umlauts etc.)
   function toBase64(str) {
     const bytes = new TextEncoder().encode(str);
-    return btoa(String.fromCharCode(...bytes));
+    let binary = '';
+    for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
+    return btoa(binary);
   }
   function fromBase64(b64) {
     const binStr = atob(b64.replace(/\n/g, ""));

@@ -279,6 +279,11 @@ function DevPanel({ open, onClose }) {
   const isDevMode = typeof window !== 'undefined' &&
     (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.location.protocol === 'file:');
 
+  // When opened as file:// the relative fetch('/api/...') won't reach localhost — use absolute URL
+  const API_BASE = (typeof window !== 'undefined' && window.location.protocol === 'file:')
+    ? 'http://localhost:8080'
+    : '';
+
   /* ── Git state ── */
   const [gitCommits, setGitCommits]       = useStateDP([]);
   const [gitDirty, setGitDirty]           = useStateDP(false);
@@ -292,6 +297,51 @@ function DevPanel({ open, onClose }) {
   const [expandedCommits, setExpandedCommits] = useStateDP(new Set());
   const gitSuccessTimer = useRefDP(null);
 
+  /* ── Auto-commit message from diff ── */
+  const [msgGenerating, setMsgGenerating] = useStateDP(false);
+
+  async function generateCommitMsg() {
+    if (msgGenerating) return;
+    setMsgGenerating(true);
+    try {
+      const res  = await fetch(API_BASE + '/api/git/diff');
+      const data = await res.json();
+      if (!data.ok || !data.files.length) { setMsgGenerating(false); return; }
+
+      const files = data.files;
+
+      // Categorise by file name
+      const label = f => {
+        const name = f.file.split('/').pop();
+        if (name === 'index.html')    return null; // captured separately
+        if (name.endsWith('.jsx'))    return name.replace('.jsx', '');
+        if (name === 'server.js')     return 'server';
+        if (name.endsWith('.json'))   return name;
+        if (name.endsWith('.css'))    return name;
+        return name;
+      };
+
+      const jsx    = files.filter(f => f.file.endsWith('.jsx'));
+      const html   = files.filter(f => f.file === 'index.html');
+      const server = files.filter(f => f.file === 'server.js');
+      const other  = files.filter(f =>
+        !f.file.endsWith('.jsx') && f.file !== 'index.html' && f.file !== 'server.js'
+      );
+
+      const bullets = [];
+      if (jsx.length)    bullets.push('- ' + jsx.map(f => label(f)).join(', ') + ': aktualisiert');
+      if (server.length) bullets.push('- server: API-Endpunkte aktualisiert');
+      if (html.length)   bullets.push('- index.html: Cache-Buster aktualisiert');
+      if (other.length)  bullets.push('- ' + other.map(f => f.file).join(', '));
+
+      setGitPushMsg(bullets.join('\n'));
+    } catch (_) {
+      setGitPushMsg('- Änderungen aktualisiert');
+    } finally {
+      setMsgGenerating(false);
+    }
+  }
+
   /* ── Direct deploy ── */
   const [deployState,  setDeployState]  = useStateDP('idle'); // idle|running|success|error
   const [deployLog,    setDeployLog]    = useStateDP('');
@@ -300,7 +350,7 @@ function DevPanel({ open, onClose }) {
     if (deployState === 'running') return;
     setDeployState('running'); setDeployLog('');
     try {
-      const res = await fetch('/api/deploy', { method: 'POST' });
+      const res = await fetch(API_BASE + '/api/deploy', { method: 'POST' });
       const data = await res.json();
       if (data.ok) {
         setDeployState('success');
@@ -331,7 +381,7 @@ function DevPanel({ open, onClose }) {
 
   async function pollCiOnce(pushTimestamp, ignoreTimestamp = false) {
     try {
-      const res = await fetch('/api/git/actions-status');
+      const res = await fetch(API_BASE + '/api/git/actions-status');
       if (!res.ok) { setCiState('api_error'); setCiApiError(`HTTP ${res.status}`); stopCiPoll(); return; }
       const data = await res.json();
       if (!data.ok) { setCiState('api_error'); setCiApiError(data.error ?? 'gh nicht gefunden'); stopCiPoll(); return; }
@@ -377,7 +427,7 @@ function DevPanel({ open, onClose }) {
   async function loadGitLog() {
     setGitLoading(true); setGitError(null);
     try {
-      const res = await fetch('/api/git/log');
+      const res = await fetch(API_BASE + '/api/git/log');
       const data = await res.json();
       if (data.ok) { setGitCommits(data.commits); setGitDirty(data.dirty); return data.commits; }
       else { setGitError(data.error ?? 'Unbekannter Fehler'); }
@@ -400,7 +450,7 @@ function DevPanel({ open, onClose }) {
     setGitPushing(true); setGitError(null);
     try {
       const message = gitPushMsg.trim() || `Stand ${new Date().toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}`;
-      const res = await fetch('/api/git/push', {
+      const res = await fetch(API_BASE + '/api/git/push', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message, notes: '' }),
@@ -427,7 +477,7 @@ function DevPanel({ open, onClose }) {
   async function gitRestore(hash) {
     setGitRestoring(hash); setGitError(null); setConfirmRestore(null);
     try {
-      const res = await fetch('/api/git/restore', {
+      const res = await fetch(API_BASE + '/api/git/restore', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ hash }),
@@ -744,24 +794,37 @@ function DevPanel({ open, onClose }) {
               </div>
               {isDevMode ? (
                 <>
-                  <div style={{ display: 'flex', gap: 8 }}>
-                    <input
-                      value={gitPushMsg}
-                      onChange={(e) => setGitPushMsg(e.target.value)}
-                      onKeyDown={(e) => { if (e.key === 'Enter') gitPush(); }}
-                      placeholder={`Stand ${new Date().toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}`}
-                      style={{ flex: 1, padding: '10px 12px', fontSize: 13, fontFamily: 'inherit', border: '1px solid var(--line-strong)', background: 'var(--bg)', color: 'var(--fg)', outline: 'none', boxSizing: 'border-box' }}
-                    />
-                    <button
-                      onClick={gitPush}
-                      disabled={gitPushing}
-                      style={{ all: 'unset', cursor: gitPushing ? 'not-allowed' : 'pointer', padding: '10px 20px', background: gitPushing ? 'var(--line-strong)' : 'var(--fg)', color: 'var(--bg)', fontSize: 13, fontWeight: 500, flexShrink: 0, opacity: gitPushing ? 0.6 : 1, transition: 'background 120ms', whiteSpace: 'nowrap' }}
-                    >
-                      {gitPushing ? 'Sichern…' : '↑ Sichern & Push'}
-                    </button>
-                  </div>
-                  <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--faint)' }}>
-                    Speichert alle Änderungen lokal (git commit) und lädt sie auf GitHub hoch (git push).
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+                      <div style={{ flex: 1, position: 'relative' }}>
+                        <textarea
+                          value={gitPushMsg}
+                          onChange={(e) => setGitPushMsg(e.target.value)}
+                          onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); gitPush(); } }}
+                          rows={gitPushMsg.includes('\n') ? Math.max(3, gitPushMsg.split('\n').length + 1) : 1}
+                          placeholder={`Stand ${new Date().toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}`}
+                          style={{ width: '100%', resize: 'none', padding: '10px 12px', fontSize: 12, fontFamily: 'var(--font-mono)', lineHeight: 1.6, border: '1px solid var(--line-strong)', background: 'var(--bg)', color: 'var(--fg)', outline: 'none', boxSizing: 'border-box' }}
+                        />
+                        <button
+                          onClick={generateCommitMsg}
+                          disabled={msgGenerating}
+                          title="Commit-Nachricht aus Änderungen generieren"
+                          style={{ all: 'unset', cursor: msgGenerating ? 'not-allowed' : 'pointer', position: 'absolute', bottom: 8, right: 8, fontSize: 10, fontFamily: 'var(--font-mono)', color: msgGenerating ? 'var(--faint)' : 'var(--accent)', letterSpacing: '0.04em', padding: '2px 6px', border: '1px solid var(--accent)', opacity: msgGenerating ? 0.5 : 1, background: 'var(--bg)' }}
+                        >
+                          {msgGenerating ? '…' : '✦ Auto'}
+                        </button>
+                      </div>
+                      <button
+                        onClick={gitPush}
+                        disabled={gitPushing}
+                        style={{ all: 'unset', cursor: gitPushing ? 'not-allowed' : 'pointer', padding: '10px 20px', background: gitPushing ? 'var(--line-strong)' : 'var(--fg)', color: 'var(--bg)', fontSize: 13, fontWeight: 500, flexShrink: 0, opacity: gitPushing ? 0.6 : 1, transition: 'background 120ms', whiteSpace: 'nowrap', alignSelf: 'flex-start' }}
+                      >
+                        {gitPushing ? 'Sichern…' : '↑ Sichern & Push'}
+                      </button>
+                    </div>
+                    <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--faint)' }}>
+                      ✦ Auto generiert Bullets aus geänderten Dateien · ⌘↵ zum Pushen
+                    </div>
                   </div>
                 </>
               ) : (

@@ -33,9 +33,17 @@ function sh(cmd) {
   });
 }
 
+// ── CORS headers (needed for file:// → localhost requests) ───────────────────
+const CORS_HEADERS = {
+  'Access-Control-Allow-Origin':          '*',
+  'Access-Control-Allow-Methods':         'GET, POST, OPTIONS',
+  'Access-Control-Allow-Headers':         'Content-Type',
+  'Access-Control-Allow-Private-Network': 'true',
+};
+
 // ── JSON response helper ──────────────────────────────────────────────────────
 function json(res, data, status = 200) {
-  res.writeHead(status, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+  res.writeHead(status, { 'Content-Type': 'application/json', ...CORS_HEADERS });
   res.end(JSON.stringify(data));
 }
 
@@ -61,6 +69,13 @@ async function ghRepo() {
 const server = http.createServer(async (req, res) => {
   const url      = new URL(req.url, `http://localhost:${PORT}`);
   const pathname = url.pathname;
+
+  // ── CORS preflight ──────────────────────────────────────────────────────────
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204, CORS_HEADERS);
+    res.end();
+    return;
+  }
 
   // ── API: git log ────────────────────────────────────────────────────────────
   if (pathname === '/api/git/log' && req.method === 'GET') {
@@ -124,6 +139,21 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // ── API: git diff (changed files for commit message preview) ────────────────
+  if (pathname === '/api/git/diff' && req.method === 'GET') {
+    try {
+      const status = await sh('git status --porcelain');
+      const files = status.split('\n').filter(Boolean).map(line => {
+        const m = line.match(/^([A-Z?! ]{1,2})\s+(.+)$/);
+        return m ? { code: m[1].trim(), file: m[2].trim() } : null;
+      }).filter(Boolean);
+      json(res, { ok: true, files });
+    } catch (e) {
+      json(res, { ok: false, error: e.message });
+    }
+    return;
+  }
+
   // ── API: Firebase Hosting deploy ────────────────────────────────────────────
   if (pathname === '/api/deploy' && req.method === 'POST') {
     try {
@@ -173,7 +203,7 @@ const server = http.createServer(async (req, res) => {
     res.writeHead(200, {
       'Content-Type': contentType,
       'Cache-Control': ext === '.jsx' ? 'no-cache' : 'public, max-age=0',
-      'Access-Control-Allow-Origin': '*',
+      ...CORS_HEADERS,
     });
     res.end(data);
   } catch {
