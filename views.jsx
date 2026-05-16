@@ -452,8 +452,15 @@ function FolderDetailView({ assets: assetsProp, folder, onBack, onOpenAsset, onO
   const [q, setQ] = useStateV("");
   const [view, setView] = useStateV("grid");
   const [sort, setSort] = useStateV("date");
-  const [filterTag, setFilterTag] = useStateV(null);
+  const [filterTags, setFilterTags] = useStateV(() => new Set());
   const [filterAuthor, setFilterAuthor] = useStateV(null);
+  function toggleFilterTag(tid) {
+    setFilterTags(prev => {
+      const next = new Set(prev);
+      next.has(tid) ? next.delete(tid) : next.add(tid);
+      return next;
+    });
+  }
   const [selection, setSelection] = useStateV(() => new Set());
   const lastSelRef = useRefV(null);
   const tagCols = useTagCols(lang);
@@ -461,12 +468,12 @@ function FolderDetailView({ assets: assetsProp, folder, onBack, onOpenAsset, onO
   const assets = useMemoV(() => {
     let xs = allAssets.filter(a => a.folderId === folder.id);
     if (q) xs = xs.filter(a => { const lq = q.toLowerCase(); return a.title.toLowerCase().includes(lq) || a.author.toLowerCase().includes(lq) || (a.notes||"").toLowerCase().includes(lq) || (a.aiDescription||"").toLowerCase().includes(lq); });
-    if (filterTag) xs = xs.filter(a => a.tags.includes(filterTag));
+    if (filterTags.size > 0) xs = xs.filter(a => [...filterTags].every(tid => a.tags.includes(tid)));
     if (filterAuthor) xs = xs.filter(a => a.author === filterAuthor);
     if (sort === "date") xs = [...xs].sort((a,b) => (a.date < b.date ? 1 : -1));
     if (sort === "title") xs = [...xs].sort((a,b) => a.title.localeCompare(b.title));
     return xs;
-  }, [allAssets, folder.id, q, sort, filterTag, filterAuthor]);
+  }, [allAssets, folder.id, q, sort, filterTags, filterAuthor]);
 
   function onToggleSelect(id, shift) {
     setSelection(prev => {
@@ -581,8 +588,8 @@ function FolderDetailView({ assets: assetsProp, folder, onBack, onOpenAsset, onO
               <option value="date">{lang === "de" ? "Neueste zuerst" : "Newest first"}</option>
               <option value="title">{lang === "de" ? "Titel A–Z" : "Title A–Z"}</option>
             </select>
-            {(filterTag || filterAuthor || q) && (
-              <button className="btn ghost sm" onClick={() => { setFilterTag(null); setFilterAuthor(null); setQ(""); }}>
+            {(filterTags.size > 0 || filterAuthor || q) && (
+              <button className="btn ghost sm" onClick={() => { setFilterTags(new Set()); setFilterAuthor(null); setQ(""); }}>
                 <window.Icon.x size={12} /> {t("clear")}
               </button>
             )}
@@ -600,10 +607,10 @@ function FolderDetailView({ assets: assetsProp, folder, onBack, onOpenAsset, onO
           const generalTags  = allTags.filter(tg => !tg.area && !tg.category);
           const labelStyle   = { minWidth: 78, alignSelf: "center", flexShrink: 0 };
           const renderTagChip = (tg) => {
-            const active = filterTag === tg.id;
+            const active = filterTags.has(tg.id);
             return (
-              <span key={tg.id} className="chip" style={{ cursor: "pointer", background: active ? window.tagColor(tg) : window.tagBg(tg), color: active ? "var(--bg)" : window.tagColor(tg), borderColor: "transparent" }}
-                onClick={() => setFilterTag(active ? null : tg.id)}>
+              <span key={tg.id} className="chip" style={{ cursor: "pointer", background: active ? window.tagColor(tg) : window.tagBg(tg), color: active ? "var(--bg)" : window.tagColor(tg), borderColor: active ? "transparent" : undefined, outline: active ? `2px solid ${window.tagColor(tg)}` : "none", outlineOffset: 1 }}
+                onClick={() => toggleFilterTag(tg.id)}>
                 <span className="tag-dot" style={{ background: active ? "var(--bg)" : window.tagColor(tg) }} />
                 {window.tagLabel(tg, lang)}
               </span>
@@ -1309,8 +1316,15 @@ function AllAssetsView({ assets: assetsProp, area, lang, onOpenAsset, onShareTar
   const isPdf = area === "print";
   const [view, setView] = useStateV("grid");
   const [sort, setSort] = useStateV("newest");
-  const [activeTag, setActiveTag] = useStateV(null);
+  const [activeTags, setActiveTags] = useStateV(() => new Set());
   const [activeAuthor, setActiveAuthor] = useStateV(null);
+  function toggleActiveTag(tid) {
+    setActiveTags(prev => {
+      const next = new Set(prev);
+      next.has(tid) ? next.delete(tid) : next.add(tid);
+      return next;
+    });
+  }
   const [selection, setSelection] = useStateV(() => new Set());
   const tagCols = useTagCols(lang);
 
@@ -1384,14 +1398,14 @@ function AllAssetsView({ assets: assetsProp, area, lang, onOpenAsset, onShareTar
         (window.effectiveTags?.(a) || a.tags).some(tid => { const tg = window.tagById(tid); return tg && (tg.name.toLowerCase().includes(q) || (tg.name_en||"").toLowerCase().includes(q)); })
       );
     }
-    if (activeTag) arr = arr.filter(a => a.tags.includes(activeTag));
+    if (activeTags.size > 0) arr = arr.filter(a => [...activeTags].every(tid => a.tags.includes(tid)));
     if (activeAuthor) arr = arr.filter(a => a.author === activeAuthor);
     arr = [...arr];
     if (sort === "newest") arr.sort((a, b) => (a.date < b.date ? 1 : -1));
     else if (sort === "oldest") arr.sort((a, b) => (a.date > b.date ? 1 : -1));
     else if (sort === "az") arr.sort((a, b) => a.title.localeCompare(b.title));
     return arr;
-  }, [all, query, activeTag, activeAuthor, sort, folderNameMap]);
+  }, [all, query, activeTags, activeAuthor, sort, folderNameMap]);
 
   return (
     <div style={{ padding: "32px 32px 64px" }}>
@@ -1404,15 +1418,15 @@ function AllAssetsView({ assets: assetsProp, area, lang, onOpenAsset, onShareTar
             </span>
             <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>
             <span className="eyebrow" style={{ marginRight: 4 }}>{t("filter_by_tag")}</span>
-            <span className={"chip" + (activeTag === null ? " active" : "")} style={{ cursor: "pointer" }} onClick={() => setActiveTag(null)}>
+            <span className={"chip" + (activeTags.size === 0 ? " active" : "")} style={{ cursor: "pointer" }} onClick={() => setActiveTags(new Set())}>
               {lang === "de" ? "Alle" : "All"}
             </span>
-            {tagIds.slice(0, 8).map(tid => {
+            {tagIds.slice(0, 12).map(tid => {
               const tg = window.tagById(tid);
               if (!tg) return null;
-              const active = activeTag === tid;
+              const active = activeTags.has(tid);
               return (
-                <span key={tid} className="chip" style={{ cursor: "pointer", background: active ? window.tagColor(tg) : window.tagBg(tg), color: active ? "var(--bg)" : window.tagColor(tg), borderColor: "transparent" }} onClick={() => setActiveTag(active ? null : tid)}>
+                <span key={tid} className="chip" style={{ cursor: "pointer", background: active ? window.tagColor(tg) : window.tagBg(tg), color: active ? "var(--bg)" : window.tagColor(tg), borderColor: active ? "transparent" : undefined, outline: active ? `2px solid ${window.tagColor(tg)}` : "none", outlineOffset: 1 }} onClick={() => toggleActiveTag(tid)}>
                   <span className="tag-dot" style={{ background: active ? "var(--bg)" : window.tagColor(tg) }} />
                   {window.tagLabel(tg, lang)}
                 </span>
