@@ -30,16 +30,16 @@
     --font-serif: "Fraunces", Georgia, serif;
   }
   [data-theme="dark"] {
-    --bg: #0c0c0b;
-    --panel: #131312;
-    --fg: #f4f4f1;
-    --fg-2: #d8d8d4;
-    --muted: #8b8b86;
-    --line: #1f1f1d;
-    --line-strong: #2e2e2b;
-    --hover: #1a1a18;
-    --faint: #5a5a56;
-    --shadow: 0 1px 0 rgba(0,0,0,0.6), 0 12px 32px -16px rgba(0,0,0,0.6);
+    --bg: #1c1b19;
+    --panel: #242321;
+    --fg: #e6e6e2;
+    --fg-2: #c6c6c2;
+    --muted: #898984;
+    --line: #2e2d2b;
+    --line-strong: #3d3c39;
+    --hover: #2a2927;
+    --faint: #5e5e5a;
+    --shadow: 0 1px 0 rgba(0,0,0,0.35), 0 12px 32px -16px rgba(0,0,0,0.35);
   }
   [data-density="compact"] { --row-h: 36px; }
   [data-density="cozy"] { --row-h: 52px; }
@@ -71,7 +71,12 @@
 
   /* Layout */
   .app { display: grid; grid-template-columns: var(--sidebar-w) 1fr; height: 100%; }
-  .sidebar { border-right: 1px solid var(--line); background: var(--panel); display: flex; flex-direction: column; min-height: 0; }
+  .sidebar { border-right: 1px solid var(--line); background: var(--panel); display: flex; flex-direction: column; min-height: 0; overflow: visible !important; }
+  /* Resize handle */
+  .sidebar-resize-handle { position: absolute; top: 0; right: -3px; width: 6px; height: 100%; z-index: 20; display: flex; align-items: center; justify-content: center; }
+  .sidebar-resize-line { width: 2px; height: 100%; border-radius: 1px; background: transparent; transition: background 0.12s; pointer-events: none; }
+  .sidebar-resize-handle:hover .sidebar-resize-line,
+  .sidebar-resize-handle:active .sidebar-resize-line { background: var(--accent); opacity: 0.7; }
   .main { display: grid; grid-template-rows: var(--topbar-h) 1fr; min-width: 0; min-height: 0; }
   .topbar { border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 16px; padding: 0 24px; background: var(--bg); }
   .content { min-height: 0; overflow: auto; }
@@ -193,6 +198,8 @@
 
   /* Asset tile */
   .asset-tile { position: relative; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; cursor: pointer; background: var(--panel); aspect-ratio: var(--ar, 1); transition: border-color .2s var(--ease-out), transform .35s var(--ease-out), box-shadow .35s var(--ease-out); will-change: transform; }
+  .asset-tile .tag-overlay { position: absolute; inset: 0; opacity: 0; pointer-events: none; background: transparent; transition: opacity .22s var(--ease-out), background .22s var(--ease-out); padding: 10px 10px 44px; display: flex; flex-direction: column; gap: 8px; overflow: hidden; }
+  .asset-tile:hover .tag-overlay { opacity: 1; background: rgba(0,0,0,0.60); }
   .asset-tile:hover { border-color: var(--fg); transform: translateY(-2px); box-shadow: 0 14px 32px -18px rgba(0,0,0,0.45); z-index: 1; }
   .asset-tile:active { transform: translateY(0) scale(0.985); transition-duration: .08s; }
   .asset-tile.selected { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent) inset, 0 14px 32px -18px rgba(0,0,0,0.45); animation: pulseRing .6s var(--ease-out); }
@@ -357,6 +364,9 @@
   <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-functions-compat.js"></script>
 
+  <!-- JSZip — client-side ZIP creation for bulk downloads -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+
   <!-- PDF.js (UMD build via unpkg — exposes window.pdfjsLib) -->
   <script src="https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
   <script>
@@ -369,16 +379,16 @@
   </script>
 
   <script type="text/babel" src="tweaks-panel.jsx?v=1778595000"></script>
-  <script type="text/babel" src="data.jsx?v=1779080000"></script>
-  <script type="text/babel" src="firebase.jsx?v=1779180000"></script>
+  <script type="text/babel" src="data.jsx?v=1779800000"></script>
+  <script type="text/babel" src="firebase.jsx?v=1779710000"></script>
   <script type="text/babel" src="auth.jsx?v=1779120000"></script>
-  <script type="text/babel" src="ui.jsx?v=1779020000"></script>
+  <script type="text/babel" src="ui.jsx?v=1779850000"></script>
   <script type="text/babel" src="pdfviewer.jsx?v=1778650000"></script>
-  <script type="text/babel" src="modals.jsx?v=1779170000"></script>
-  <script type="text/babel" src="views.jsx?v=1779202000"></script>
-  <script type="text/babel" src="settings.jsx?v=1779200000"></script>
+  <script type="text/babel" src="modals.jsx?v=1779840000"></script>
+  <script type="text/babel" src="views.jsx?v=1779810000"></script>
+  <script type="text/babel" src="settings.jsx?v=1779900000"></script>
   <script type="text/babel" src="admin.jsx?v=1779180000"></script>
-  <script type="text/babel" src="devpanel.jsx?v=1778595000"></script>
-  <script type="text/babel" src="app.jsx?v=1779190000"></script>
+  <script type="text/babel" src="devpanel.jsx?v=1779910000"></script>
+  <script type="text/babel" src="app.jsx?v=1779870000"></script>
 </body>
 </html>

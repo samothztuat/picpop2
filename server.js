@@ -124,6 +124,23 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // ── API: Firebase Hosting deploy ────────────────────────────────────────────
+  if (pathname === '/api/deploy' && req.method === 'POST') {
+    try {
+      const output = await new Promise((resolve, reject) => {
+        exec('firebase deploy --only hosting', { cwd: ROOT, maxBuffer: 16 * 1024 * 1024 }, (err, stdout, stderr) => {
+          const out = (stdout + '\n' + stderr).trim();
+          if (err) reject(new Error(out || err.message));
+          else resolve(out);
+        });
+      });
+      json(res, { ok: true, output });
+    } catch (e) {
+      json(res, { ok: false, error: e.message });
+    }
+    return;
+  }
+
   // ── API: GitHub Actions Status ──────────────────────────────────────────────
   if (pathname === '/api/git/actions-status' && req.method === 'GET') {
     try {

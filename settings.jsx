@@ -463,7 +463,7 @@ function SettingsView({ lang, setLang, theme, setTheme, density, setDensity, tea
     setTagEditingId(null);
   }
 
-  // group: "image" | "medium" | "kampagne"
+  // group: "bilder" | "kampagne" | "medium"
   function openTagCreate(group) {
     setTagCreatingGroup(g => g === group ? null : group);
     setTagEditingId(null);
@@ -473,17 +473,21 @@ function SettingsView({ lang, setLang, theme, setTheme, density, setDensity, tea
 
   function commitTagCreate(group) {
     if (!tagNewForm.name.trim()) { setTagCreatingGroup(null); return; }
-    const area     = group === "image" ? undefined : "print";
-    const category = group === "image" ? undefined : group;
-    onSaveTag?.({ id: "t-" + Math.random().toString(36).slice(2, 8), name: tagNewForm.name.trim(), name_en: tagNewForm.name_en.trim(), hue: 0, area, category });
+    const cfg = {
+      bilder:   { category: "motiv"    },
+      kampagne: { category: "kampagne" },
+      medium:   { category: "medium", area: "print" },
+    }[group] || { category: "motiv" };
+    onSaveTag?.({ id: "t-" + Math.random().toString(36).slice(2, 8), name: tagNewForm.name.trim(), name_en: tagNewForm.name_en.trim(), hue: 0, ...cfg });
     setTagNewForm({ name: "", name_en: "" });
     setTagCreatingGroup(null);
   }
 
   // Grouped tag lists (sorted by name within each group)
   const byName = (a, b) => (a.name || "").localeCompare(b.name || "");
-  const imageTags  = tags.filter(t => !t.area).sort(byName);
-  const mediumTags = tags.filter(t => t.area === "print" && t.category === "medium").sort(byName);
+  const bilderTags   = tags.filter(t => t.category === "motiv").sort(byName);
+  const kampagneTags = tags.filter(t => t.category === "kampagne").sort(byName);
+  const mediumTags   = tags.filter(t => t.category === "medium").sort(byName);
 
   /* ── Shared styles ── */
   const card = {
@@ -916,6 +920,142 @@ function SettingsView({ lang, setLang, theme, setTheme, density, setDensity, tea
         </div>
       </section>
 
+      {/* ══ 3b · Deployment & Infrastruktur ════════════════════════════════ */}
+      <section>
+        <SectionLabel>{lang === "de" ? "Deployment & Infrastruktur" : "Deployment & Infrastructure"}</SectionLabel>
+
+        {/* Firebase Hosting */}
+        <div style={{ ...card, marginBottom: 2 }}>
+          <div style={{ padding: "20px 24px", borderBottom: "1px solid var(--line)", display: "flex", alignItems: "center", gap: 16 }}>
+            <div style={{ width: 40, height: 40, background: "var(--bg)", border: "1px solid var(--line-strong)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+              {/* Firebase flame icon */}
+              <svg width="18" height="22" viewBox="0 0 192 256" fill="none">
+                <path fill="oklch(0.60 0.18 60)" d="M96 0C96 0 44 80 44 136c0 28.7 23.3 52 52 52s52-23.3 52-52C148 90 96 0 96 0z"/>
+                <path fill="oklch(0.52 0.20 30)" d="M96 0C96 0 68 64 68 108c0 15.5 12.5 28 28 28s28-12.5 28-28C124 72 96 0 96 0z"/>
+              </svg>
+            </div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 3 }}>Firebase Hosting</div>
+              <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--muted)" }}>
+                picpop-bilddatenbank.web.app &nbsp;·&nbsp; picpop-bilddatenbank.firebaseapp.com
+              </div>
+            </div>
+            <a href="https://picpop-bilddatenbank.web.app" target="_blank" rel="noreferrer"
+              style={{ all: "unset", cursor: "pointer", padding: "6px 14px", border: "1px solid var(--line-strong)", fontSize: 12, color: "var(--muted)", whiteSpace: "nowrap" }}
+              onMouseEnter={e => { e.currentTarget.style.background = "var(--hover)"; e.currentTarget.style.color = "var(--fg)"; }}
+              onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--muted)"; }}
+            >
+              {lang === "de" ? "Live öffnen ↗" : "Open live ↗"}
+            </a>
+          </div>
+
+          <div style={{ padding: "20px 24px", display: "flex", flexDirection: "column", gap: 16 }}>
+
+            {/* Workflow A */}
+            <div>
+              <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6, display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, padding: "2px 7px", background: "var(--line-strong)", color: "var(--muted)", letterSpacing: "0.06em" }}>A</span>
+                {lang === "de" ? "Direktes Deployment (empfohlen für lokale Entwicklung)" : "Direct deployment (recommended for local dev)"}
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "4px 12px", alignItems: "baseline" }}>
+                {[
+                  ["1.", lang === "de" ? "Dev-Server starten:" : "Start dev server:"],
+                  ["", "node server.js"],
+                  ["2.", lang === "de" ? "Im Dev-Panel → GitHub-Tab → \"Sichern & Push\" (commit + git push)" : "In Dev-Panel → GitHub tab → \"Save & Push\" (commit + git push)"],
+                  ["", ""],
+                  ["3.", lang === "de" ? "Dann \"Jetzt deployen\" klicken — führt aus:" : "Then click \"Deploy now\" — runs:"],
+                  ["", "firebase deploy --only hosting"],
+                ].map(([n, t], i) => t ? (
+                  <React.Fragment key={i}>
+                    <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--faint)", textAlign: "right", paddingTop: 2 }}>{n}</span>
+                    <span style={{ fontFamily: n === "" ? "var(--font-mono)" : "var(--font-sans)", fontSize: n === "" ? 11 : 12, color: n === "" ? "var(--accent)" : "var(--muted)", background: n === "" ? "var(--bg)" : "transparent", padding: n === "" ? "2px 8px" : "0", border: n === "" ? "1px solid var(--line)" : "none", lineHeight: 1.5 }}>{t}</span>
+                  </React.Fragment>
+                ) : <React.Fragment key={i}><span /><span /></React.Fragment>)}
+              </div>
+            </div>
+
+            <div style={{ borderTop: "1px solid var(--line)" }} />
+
+            {/* Workflow B */}
+            <div>
+              <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6, display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, padding: "2px 7px", background: "var(--line-strong)", color: "var(--muted)", letterSpacing: "0.06em" }}>B</span>
+                {lang === "de" ? "Automatisch via GitHub Actions (CI/CD)" : "Automatic via GitHub Actions (CI/CD)"}
+              </div>
+              <div style={{ fontSize: 12, color: "var(--muted)", lineHeight: 1.6, marginBottom: 10 }}>
+                {lang === "de"
+                  ? "Nach jedem \"Sichern & Push\" kann GitHub Actions automatisch deployen. Dafür wird eine Workflow-Datei im Repository benötigt."
+                  : "After every \"Save & Push\", GitHub Actions can automatically deploy. A workflow file in the repository is required."}
+              </div>
+              <details style={{ fontSize: 11, color: "var(--muted)" }}>
+                <summary style={{ cursor: "pointer", fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: "0.06em", color: "var(--faint)", userSelect: "none", marginBottom: 6 }}>
+                  {lang === "de" ? "Workflow-Datei anzeigen (.github/workflows/deploy.yml)" : "Show workflow file (.github/workflows/deploy.yml)"}
+                </summary>
+                <pre style={{ margin: 0, padding: "12px 14px", background: "var(--bg)", border: "1px solid var(--line)", fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--muted)", lineHeight: 1.6, overflowX: "auto", whiteSpace: "pre" }}>{`name: Deploy to Firebase Hosting
+on:
+  push:
+    branches: [main]
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm install -g firebase-tools
+      - run: firebase deploy --only hosting --token "$FIREBASE_TOKEN"
+        env:
+          FIREBASE_TOKEN: \${{ secrets.FIREBASE_TOKEN }}`}</pre>
+                <div style={{ marginTop: 8, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--faint)", lineHeight: 1.6 }}>
+                  {lang === "de"
+                    ? "FIREBASE_TOKEN aus \"firebase login:ci\" generieren und als Repository-Secret hinterlegen."
+                    : "Generate FIREBASE_TOKEN via \"firebase login:ci\" and store it as a repository secret."}
+                </div>
+              </details>
+            </div>
+          </div>
+        </div>
+
+        {/* Dev-Server info */}
+        <div style={{ ...card }}>
+          <div style={{ padding: "16px 24px", borderBottom: "1px solid var(--line)", display: "flex", alignItems: "center", gap: 12 }}>
+            <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--muted)", fontWeight: 600 }}>server.js</div>
+            <div style={{ fontSize: 12, color: "var(--muted)" }}>
+              {lang === "de" ? "Lokaler Dev-Server — Git-API + statische Dateien" : "Local dev server — Git API + static files"}
+            </div>
+          </div>
+          <div style={{ padding: "16px 24px", display: "flex", flexDirection: "column", gap: 10 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "max-content 1fr", gap: "6px 16px", alignItems: "center" }}>
+              {[
+                [lang === "de" ? "Starten:" : "Start:", "node server.js"],
+                ["URL:", "http://localhost:8080"],
+                ["Git-API:", "/api/git/log   /api/git/push   /api/git/restore"],
+                ["Deploy-API:", "/api/deploy"],
+                [lang === "de" ? "Zweck:" : "Purpose:", lang === "de" ? "Ermöglicht Git-Operationen und direktes Deployment im Dev-Panel" : "Enables git operations and direct deployment in Dev Panel"],
+              ].map(([label, val], i) => (
+                <React.Fragment key={i}>
+                  <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--faint)", textAlign: "right", whiteSpace: "nowrap" }}>{label}</span>
+                  <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--muted)", wordBreak: "break-all" }}>{val}</span>
+                </React.Fragment>
+              ))}
+            </div>
+            <div style={{ marginTop: 4, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--faint)", lineHeight: 1.6, borderTop: "1px solid var(--line)", paddingTop: 10 }}>
+              {lang === "de"
+                ? "Der Dev-Server muss lokal laufen, damit der GitHub-Tab im Dev-Panel funktioniert. Im Firebase-Hosting-Betrieb sind diese Funktionen nicht verfügbar — nur der lokale Entwicklungsworkflow nutzt server.js."
+                : "The dev server must run locally for the GitHub tab in Dev Panel to work. In Firebase Hosting mode, these features are unavailable — only the local development workflow uses server.js."}
+            </div>
+          </div>
+        </div>
+
+        {/* Two-layer versioning note */}
+        <div style={{ marginTop: 12, fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--faint)", lineHeight: 1.7 }}>
+          {lang === "de"
+            ? "picpop verwendet zwei unabhängige Versionierungsebenen: (1) Quellcode via Git/GitHub — Commits der JSX/HTML-Dateien, wiederherstellbar per Dev-Panel. (2) Firestore-Daten via GitHub-API — JSON-Snapshots aller Assets, Tags und Ordner, wiederherstellbar per Pull oben."
+            : "picpop uses two independent versioning layers: (1) Source code via Git/GitHub — commits of JSX/HTML files, restorable via Dev Panel. (2) Firestore data via GitHub API — JSON snapshots of all assets, tags and folders, restorable via Pull above."}
+        </div>
+      </section>
+
       {/* ══ 4 · KI-Konfiguration ════════════════════════════════════════════ */}
       <section>
         <SectionLabel>{lang === "de" ? "KI-Konfiguration" : "AI configuration"}</SectionLabel>
@@ -1255,26 +1395,27 @@ function SettingsView({ lang, setLang, theme, setTheme, density, setDensity, tea
         <SectionLabel>{lang === "de" ? "Tags verwalten" : "Manage tags"}</SectionLabel>
 
         {/* Render one group: sub-header + optional create form + table of rows */}
-        {[
-          { group: "image",  groupTags: imageTags,  label: lang === "de" ? "Bilder" : "Images", printSub: false },
-          { group: "medium", groupTags: mediumTags, label: "Medium",                             printSub: true  },
-        ].map(({ group, groupTags, label, printSub }, gi) => {
-          const isCreating = tagCreatingGroup === group;
-          const TAG_AREA_OPTIONS = [
-            { value: "",             label: lang === "de" ? "Bilder (allgemein)" : "Images (general)" },
-            { value: "print|medium", label: "Print · Medium" },
+        {(() => {
+          const GROUP_OPTIONS = [
+            { value: "motiv",    label: lang === "de" ? "Bilder"    : "Images"    },
+            { value: "kampagne", label: lang === "de" ? "Kampagnen" : "Campaigns"  },
+            { value: "medium",   label: "Medium"                                    },
           ];
-          function areaVal(t) { return t.area === "print" && t.category ? `print|${t.category}` : ""; }
-          function areaToFields(v) { return v.startsWith("print|") ? { area: "print", category: v.split("|")[1] } : { area: "", category: "" }; }
+          function catVal(t) { return t.category || "motiv"; }
+          function catToFields(v) {
+            if (v === "medium")   return { area: "print",     category: "medium"   };
+            if (v === "kampagne") return { area: undefined,   category: "kampagne" };
+            return                       { area: undefined,   category: "motiv"    };
+          }
+          return [
+            { group: "bilder",   groupTags: bilderTags,   label: lang === "de" ? "Bilder"    : "Images"    },
+            { group: "kampagne", groupTags: kampagneTags, label: lang === "de" ? "Kampagnen" : "Campaigns"  },
+            { group: "medium",   groupTags: mediumTags,   label: "Medium"                                   },
+          ].map(({ group, groupTags, label }, gi) => {
+          const isCreating = tagCreatingGroup === group;
 
           return (
             <div key={group} style={{ marginTop: gi === 0 ? 0 : 32 }}>
-              {/* "Print" super-header before the first print group */}
-              {gi === 1 && (
-                <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, textTransform: "uppercase", letterSpacing: "0.14em", color: "var(--muted)", paddingBottom: 10, borderBottom: "1px solid var(--line)", marginBottom: 0 }}>
-                  Print
-                </div>
-              )}
 
               {/* Group sub-header + "Neuer Tag" button */}
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 0 10px" }}>
@@ -1345,8 +1486,8 @@ function SettingsView({ lang, setLang, theme, setTheme, density, setDensity, tea
                         </div>
                         <div>
                           <FieldLabel>{lang === "de" ? "Gruppe" : "Group"}</FieldLabel>
-                          <select value={areaVal(tagEditForm)} onChange={e => { const flds = areaToFields(e.target.value); setTagEditForm(n => ({ ...n, area: flds.area, category: flds.category })); }} style={{ ...inputStyle, cursor: "pointer" }}>
-                            {TAG_AREA_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                          <select value={catVal(tagEditForm)} onChange={e => { const flds = catToFields(e.target.value); setTagEditForm(n => ({ ...n, area: flds.area || "", category: flds.category })); }} style={{ ...inputStyle, cursor: "pointer" }}>
+                            {GROUP_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
                           </select>
                         </div>
                       </div>
@@ -1392,7 +1533,8 @@ function SettingsView({ lang, setLang, theme, setTheme, density, setDensity, tea
               </div>
             </div>
           );
-        })}
+        });
+        })()}
       </section>
 
       {/* ══ 6 · App-Info ════════════════════════════════════════════════════ */}

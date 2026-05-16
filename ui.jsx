@@ -2,14 +2,38 @@
 
 const { useState, useEffect, useRef, useMemo, useCallback, useContext, createContext, Fragment } = React;
 
-// -------- Thumb-size slider (shared via localStorage) --------
+// -------- Thumb-size slider (shared via localStorage + custom event) --------
+const THUMB_KEY = "picpop.thumbSize";
+const THUMB_MIN = 140, THUMB_MAX = 420, THUMB_STEP = 10;
+const THUMB_EVT = "picpop:thumbsize";
+
+function clampThumb(v) {
+  return Math.max(THUMB_MIN, Math.min(THUMB_MAX, Math.round(v / THUMB_STEP) * THUMB_STEP));
+}
+// Call this from anywhere (e.g. pinch handler in app.jsx) — all useThumbSize instances react
+function setGlobalThumbSize(v) {
+  const next = clampThumb(v);
+  localStorage.setItem(THUMB_KEY, String(next));
+  window.dispatchEvent(new CustomEvent(THUMB_EVT, { detail: next }));
+}
+window.setGlobalThumbSize = setGlobalThumbSize;
+
 function useThumbSize() {
-  const KEY = "picpop.thumbSize";
   const [size, _setSize] = useState(() => {
-    const v = parseInt(localStorage.getItem(KEY) || "", 10);
-    return Number.isFinite(v) && v >= 120 && v <= 480 ? v : 220;
+    const v = parseInt(localStorage.getItem(THUMB_KEY) || "", 10);
+    return Number.isFinite(v) && v >= THUMB_MIN && v <= THUMB_MAX ? v : 220;
   });
-  const setSize = (v) => { _setSize(v); localStorage.setItem(KEY, String(v)); };
+  const setSize = (v) => {
+    const next = clampThumb(v);
+    _setSize(next);
+    localStorage.setItem(THUMB_KEY, String(next));
+    window.dispatchEvent(new CustomEvent(THUMB_EVT, { detail: next }));
+  };
+  useEffect(() => {
+    const sync = (e) => _setSize(e.detail);
+    window.addEventListener(THUMB_EVT, sync);
+    return () => window.removeEventListener(THUMB_EVT, sync);
+  }, []);
   return [size, setSize];
 }
 
@@ -113,11 +137,33 @@ function folderById(id) { return [...window.FOLDERS, ...window.PDF_FOLDERS].find
 function tagLabel(tag, lang) { return lang === "en" ? tag.name_en : tag.name; }
 
 function tagColor(tag, dark) {
+  if (tag?.id?.startsWith("t-unassigned-")) return "var(--muted)";
   return "var(--fg-2)";
 }
 function tagBg(tag, dark) {
+  if (tag?.id?.startsWith("t-unassigned-")) return "var(--hover)";
   return "var(--hover)";
 }
+
+// Returns asset.tags plus a virtual "Nicht zugeordnet" tag for each category
+// that has no real tag assigned yet. Never writes to DB — display only.
+function effectiveTags(asset) {
+  const real = asset.tags || [];
+  const CATS = ["motiv", "kampagne", "medium"];
+  const virtual = [];
+  CATS.forEach(cat => {
+    const hasAny = real.some(tid => {
+      const tg = tagById(tid);
+      return tg && tg.category === cat;
+    });
+    if (!hasAny) {
+      const uid = `t-unassigned-${cat}`;
+      if (tagById(uid)) virtual.push(uid);
+    }
+  });
+  return virtual.length ? [...real, ...virtual] : real;
+}
+window.effectiveTags = effectiveTags;
 
 // Build a deterministic image URL from a seed.
 function imgUrl(seed, w = 800, h = 600) {
@@ -126,30 +172,51 @@ function imgUrl(seed, w = 800, h = 600) {
 }
 
 // Image with hue-tinted placeholder background while loading / on error.
+// Uses thumbnailUrl when available (pre-generated smaller JPEG), falls back to storageUrl.
+// Defers network request via IntersectionObserver until tile is near the viewport.
 function AssetImg({ asset, w = 800, h, style, className = "", alt = "" }) {
   const ratio = asset.ratio || 1;
   const height = h || Math.round(w / ratio);
+  const [visible, setVisible] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [failed, setFailed] = useState(false);
-  const src = asset.storageUrl || imgUrl(asset.id + "-" + asset.title, w, height);
+  const containerRef = useRef(null);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    if (!window.IntersectionObserver) { setVisible(true); return; }
+    const obs = new IntersectionObserver(
+      ([entry]) => { if (entry.isIntersecting) { setVisible(true); obs.disconnect(); } },
+      { rootMargin: "400px" }
+    );
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, []);
+
+  // Prefer pre-generated thumbnail (smaller JPEG) over raw full-res storage URL
+  const src = asset.thumbnailUrl
+    || asset.storageUrl
+    || imgUrl(asset.id + "-" + asset.title, w, height);
+
   return (
-    <div className={className} style={{
+    <div ref={containerRef} className={className} style={{
       position: "absolute", inset: 0, width: "100%", height: "100%",
-      background: `linear-gradient(180deg, oklch(86% 0.06 ${asset.hue}), oklch(72% 0.08 ${asset.hue}))`,
+      background: "var(--line-strong)",
       overflow: "hidden",
       ...style,
     }}>
-      {!failed && (
+      {!failed && visible && (
         <img
           src={src}
           alt={alt || asset.title}
-          loading="lazy"
+          decoding="async"
           draggable={false}
           onLoad={() => setLoaded(true)}
           onError={() => setFailed(true)}
           style={{
             width: "100%", height: "100%", objectFit: "cover", display: "block",
-            opacity: loaded ? 1 : 0, transition: "opacity .25s ease",
+            opacity: loaded ? 1 : 0, transition: "opacity .22s ease",
           }}
         />
       )}
@@ -161,35 +228,35 @@ function AssetImg({ asset, w = 800, h, style, className = "", alt = "" }) {
 function PH({ hue = 25, label = "image", style, ratio, className = "" }) {
   const s = {
     ...(ratio ? { aspectRatio: ratio } : {}),
-    "--ph-1": `oklch(86% 0.06 ${hue})`,
-    "--ph-2": `oklch(72% 0.08 ${hue})`,
+    "--ph-1": "var(--line-strong)",
+    "--ph-2": "var(--line)",
     ...style,
   };
   return <div className={"ph " + className} style={s} data-label={label} />;
 }
 function PHDark({ hue = 25, label = "image", style }) {
-  // PDF style — paper-like with header bar
+  // PDF / print placeholder — paper white, no colour tint
   return (
     <div className="ph" style={{
-      "--ph-1": `oklch(96% 0.01 ${hue})`,
-      "--ph-2": `oklch(92% 0.02 ${hue})`,
+      "--ph-1": "#efefed",
+      "--ph-2": "#e6e6e4",
       width: "100%",
       height: "100%",
       ...style,
     }} data-label={label}>
-      <div style={{ position: "absolute", inset: "8% 10% auto 10%", height: "6%", background: `oklch(60% 0.16 ${hue})`, borderRadius: 1 }} />
+      <div style={{ position: "absolute", inset: "8% 10% auto 10%", height: "6%", background: "var(--line-strong)", borderRadius: 1 }} />
       <div style={{ position: "absolute", inset: "20% 10% 60% 10%", display: "grid", gap: "2%", gridTemplateColumns: "1fr 1fr" }}>
-        <div style={{ background: `oklch(70% 0.12 ${hue})`, borderRadius: 2 }} />
+        <div style={{ background: "var(--line)", borderRadius: 2 }} />
         <div style={{ display: "grid", gap: "8%" }}>
-          <div style={{ background: "rgba(0,0,0,0.1)", height: "20%" }} />
-          <div style={{ background: "rgba(0,0,0,0.08)", height: "12%", width: "80%" }} />
-          <div style={{ background: "rgba(0,0,0,0.08)", height: "12%", width: "60%" }} />
-          <div style={{ background: "rgba(0,0,0,0.08)", height: "12%", width: "70%" }} />
+          <div style={{ background: "rgba(0,0,0,0.08)", height: "20%" }} />
+          <div style={{ background: "rgba(0,0,0,0.06)", height: "12%", width: "80%" }} />
+          <div style={{ background: "rgba(0,0,0,0.06)", height: "12%", width: "60%" }} />
+          <div style={{ background: "rgba(0,0,0,0.06)", height: "12%", width: "70%" }} />
         </div>
       </div>
       <div style={{ position: "absolute", left: "10%", right: "10%", bottom: "12%", display: "grid", gap: "1.5%" }}>
         {[1,2,3,4,5].map(i => (
-          <div key={i} style={{ height: "5%", width: (90 - i*8) + "%", background: "rgba(0,0,0,0.08)" }} />
+          <div key={i} style={{ height: "5%", width: (90 - i*8) + "%", background: "rgba(0,0,0,0.06)" }} />
         ))}
       </div>
     </div>
@@ -285,7 +352,7 @@ function FolderTile({ folder, onOpen, kind = "image", onMoveAssets }) {
             {a.kind === "pdf"
               ? (a.thumbnailUrl
                   ? <div style={{ position: "absolute", inset: 0, overflow: "hidden" }}>
-                      <img src={a.thumbnailUrl} draggable={false} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+                      <img src={a.thumbnailUrl} draggable={false} loading="lazy" decoding="async" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
                     </div>
                   : <PHDark hue={a.hue} label="" />)
               : (!a.storageUrl && kind === "pdf")
@@ -312,18 +379,32 @@ function FolderTile({ folder, onOpen, kind = "image", onMoveAssets }) {
 
 // AssetTile — draggable; dragIds = IDs to move (all selected if tile is in selection)
 function AssetTile({ asset, onOpen, selectable = false, selected = false, onToggleSelect, dragIds }) {
+  const { lang = "de" } = React.useContext(window.LangCtx) || {};
   const { favorites, toggleFavorite } = useFav();
   const fav = favorites.has(asset.id);
   const [isDragging, setIsDragging] = useState(false);
+  const clickTimerRef = useRef(null);
 
   function clickFav(e) { e.stopPropagation(); toggleFavorite(asset.id); }
   function clickSel(e) { e.stopPropagation(); onToggleSelect && onToggleSelect(asset.id, e.shiftKey); }
   function clickTile(e) {
-    if (selectable && (e.metaKey || e.ctrlKey || e.shiftKey)) {
-      e.preventDefault(); e.stopPropagation();
+    e.stopPropagation();
+    if (e.metaKey || e.ctrlKey || e.shiftKey) {
+      e.preventDefault();
       onToggleSelect && onToggleSelect(asset.id, e.shiftKey);
       return;
     }
+    if (!onToggleSelect) { onOpen && onOpen(e); return; }
+    // Defer selection — dblclick will cancel
+    if (clickTimerRef.current) clearTimeout(clickTimerRef.current);
+    clickTimerRef.current = setTimeout(() => {
+      clickTimerRef.current = null;
+      onToggleSelect(asset.id, false);
+    }, 300);
+  }
+  function dblClickTile(e) {
+    e.stopPropagation();
+    if (clickTimerRef.current) { clearTimeout(clickTimerRef.current); clickTimerRef.current = null; }
     onOpen && onOpen(e);
   }
 
@@ -354,6 +435,7 @@ function AssetTile({ asset, onOpen, selectable = false, selected = false, onTogg
     <div
       className={"asset-tile" + (selected ? " selected" : "") + (selectable ? " selectable" : "") + (isDragging ? " dragging" : "")}
       onClick={clickTile}
+      onDoubleClick={dblClickTile}
       style={{ "--ar": asset.ratio }}
       draggable
       onDragStart={handleDragStart}
@@ -363,7 +445,7 @@ function AssetTile({ asset, onOpen, selectable = false, selected = false, onTogg
         ? (asset.thumbnailUrl
             // Pre-generated JPEG thumbnail from upload — simple <img>, no CORS issues
             ? <div style={{ position: "absolute", inset: 0, overflow: "hidden" }}>
-                <img src={asset.thumbnailUrl} draggable={false}
+                <img src={asset.thumbnailUrl} draggable={false} loading="lazy" decoding="async"
                   style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
               </div>
             : asset.storageUrl
@@ -371,6 +453,40 @@ function AssetTile({ asset, onOpen, selectable = false, selected = false, onTogg
                 : <PHDark hue={asset.hue} label={asset.format} />)
         : <AssetImg asset={asset} w={600} />
       }
+      {/* Tag overlay — shown on hover, grouped by category */}
+      {(() => {
+        // Images only show motiv tags; PDFs/prints show all categories
+        const CAT_ORDER = asset.kind === "image"
+          ? ["motiv", null]
+          : ["motiv", "kampagne", "medium", null];
+        const buckets = new Map(CAT_ORDER.map(c => [c, []]));
+        effectiveTags(asset).forEach(tid => {
+          const tg = window.tagById?.(tid);
+          if (!tg) return;
+          const cat = tg.category || null;
+          if (!buckets.has(cat)) buckets.set(cat, []);
+          buckets.get(cat).push(tg);
+        });
+        const CAT_LABELS = { motiv: lang === "de" ? "Bilder" : "Images", kampagne: lang === "de" ? "Kampagne" : "Campaign", medium: "Medium", "__null__": lang === "de" ? "Sonstige" : "Other" };
+        const groups = CAT_ORDER.map(cat => ({ cat, label: CAT_LABELS[cat ?? "__null__"], tags: buckets.get(cat) || [] })).filter(g => g.tags.length > 0);
+        return (
+          <div className="tag-overlay">
+            {groups.map(({ cat, label, tags }) => (
+              <div key={cat ?? "__null__"}>
+                <div style={{ fontFamily: "var(--font-mono)", fontSize: 8, letterSpacing: "0.12em", textTransform: "uppercase", color: "rgba(255,255,255,0.45)", marginBottom: 4 }}>{label}</div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 3 }}>
+                  {tags.map(tg => (
+                    <span key={tg.id} style={{ display: "inline-flex", alignItems: "center", gap: 3, fontSize: 10, padding: "2px 6px", borderRadius: 3, background: "rgba(255,255,255,0.10)", color: "rgba(255,255,255,0.92)", border: "1px solid rgba(255,255,255,0.14)" }}>
+                      <span style={{ width: 5, height: 5, borderRadius: "50%", background: tagColor(tg), flexShrink: 0 }} />
+                      {tagLabel(tg, lang)}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        );
+      })()}
       <button className={"sel-check" + (selected ? " on" : "")} onClick={clickSel} aria-label="select" title="Select">
         {selected && <Icon.check size={12} />}
       </button>
@@ -463,10 +579,235 @@ function Empty({ icon: I = Icon.inbox, title, hint, action }) {
   );
 }
 
+// Inline tag picker with create-new capability
+function TagPickerPanel({ lang, onApplyTag, onRemoveTag, selectedAssets }) {
+  const [query, setQuery] = useState("");
+  const [activeCat, setActiveCat] = useState(null); // null = all
+  const inputRef = useRef(null);
+  // In the Bilder area only motiv tags are relevant; Print shows all categories
+  const area = window.currentArea || "images";
+  const allTags = window.TAGS || [];
+  const tags = area === "images"
+    ? allTags.filter(tg => !tg.category || tg.category === "motiv")
+    : allTags;
+  const sel = selectedAssets || [];
+
+  // Compute which tags are on ALL vs SOME selected assets
+  const appliedAll = React.useMemo(() => {
+    if (!sel.length) return new Set();
+    const s = new Set();
+    tags.forEach(tg => {
+      if (sel.every(a => a.tags.includes(tg.id))) s.add(tg.id);
+    });
+    return s;
+  }, [sel, tags]);
+
+  const appliedSome = React.useMemo(() => {
+    if (!sel.length) return new Set();
+    const s = new Set();
+    tags.forEach(tg => {
+      if (!appliedAll.has(tg.id) && sel.some(a => a.tags.includes(tg.id))) s.add(tg.id);
+    });
+    return s;
+  }, [sel, tags, appliedAll]);
+
+  // Derive available categories from TAGS
+  const cats = React.useMemo(() => {
+    const seen = new Map();
+    tags.forEach(tg => {
+      const cat = tg.category || null;
+      if (!seen.has(cat)) {
+        const label = cat === "motiv"    ? (lang === "de" ? "Bilder"   : "Images")
+                    : cat === "kampagne" ? (lang === "de" ? "Kampagne" : "Campaign")
+                    : cat === "medium"   ? "Medium"
+                    : (lang === "de"     ? "Sonstige" : "Other");
+        seen.set(cat, label);
+      }
+    });
+    return [...seen.entries()].map(([cat, label]) => ({ cat, label }));
+  }, [tags, lang]);
+
+  const q = query.trim().toLowerCase();
+
+  // Filter by category, then search, then sort: appliedAll → appliedSome → rest
+  const filtered = React.useMemo(() => {
+    let xs = activeCat === null ? tags : tags.filter(tg => (tg.category || null) === activeCat);
+    if (q) xs = xs.filter(tg => tagLabel(tg, lang).toLowerCase().includes(q));
+    return [...xs].sort((a, b) => {
+      const rank = t => appliedAll.has(t.id) ? 0 : appliedSome.has(t.id) ? 1 : 2;
+      return rank(a) - rank(b);
+    });
+  }, [tags, activeCat, q, lang, appliedAll, appliedSome]);
+
+  const exactMatch = tags.some(tg => tagLabel(tg, lang).toLowerCase() === q);
+  const canCreate = q && !exactMatch;
+
+  useEffect(() => { setTimeout(() => inputRef.current?.focus(), 40); }, []);
+
+  function handleCreate() {
+    const name = query.trim();
+    if (!name) return;
+    const tag = {
+      id: "tag-" + Math.random().toString(36).slice(2, 8),
+      name,
+      name_en: name,
+      hue: Math.floor(Math.random() * 360),
+      category: activeCat || undefined,
+    };
+    window.saveTag?.(tag);
+    onApplyTag?.(tag.id);
+    setQuery("");
+  }
+
+  return (
+    <div>
+      <div className="eyebrow" style={{ marginBottom: 10 }}>{lang === "de" ? "Tag zu Auswahl hinzufügen" : "Add tag to selection"}</div>
+
+      {/* Category filter tabs */}
+      {cats.length > 1 && (
+        <div style={{ display: "flex", gap: 4, marginBottom: 10, flexWrap: "wrap" }}>
+          <span
+            onClick={() => setActiveCat(null)}
+            style={{ display: "inline-flex", alignItems: "center", height: 24, padding: "0 10px", borderRadius: 4, fontSize: 11, cursor: "pointer", fontFamily: "var(--font-mono)", letterSpacing: "0.04em", border: `1px solid ${activeCat === null ? "transparent" : "var(--line-strong)"}`, background: activeCat === null ? "var(--fg)" : "var(--panel)", color: activeCat === null ? "var(--bg)" : "var(--fg-2)", transition: "background .12s, color .12s" }}
+          >
+            {lang === "de" ? "Alle" : "All"}
+          </span>
+          {cats.map(({ cat, label }) => (
+            <span
+              key={cat ?? "__none__"}
+              onClick={() => setActiveCat(activeCat === cat ? null : cat)}
+              style={{ display: "inline-flex", alignItems: "center", height: 24, padding: "0 10px", borderRadius: 4, fontSize: 11, cursor: "pointer", fontFamily: "var(--font-mono)", letterSpacing: "0.04em", border: `1px solid ${activeCat === cat ? "transparent" : "var(--line-strong)"}`, background: activeCat === cat ? "var(--fg)" : "var(--panel)", color: activeCat === cat ? "var(--bg)" : "var(--fg-2)", transition: "background .12s, color .12s" }}
+            >
+              {label}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {/* Search / create input */}
+      <div style={{ position: "relative", marginBottom: 10 }}>
+        <Icon.search size={13} style={{ position: "absolute", left: 8, top: "50%", transform: "translateY(-50%)", color: "var(--muted)", pointerEvents: "none" }} />
+        <input
+          ref={inputRef}
+          value={query}
+          onChange={e => setQuery(e.target.value)}
+          onKeyDown={e => { if (e.key === "Enter" && canCreate) handleCreate(); }}
+          placeholder={lang === "de" ? "Suchen oder erstellen…" : "Search or create…"}
+          style={{ width: "100%", boxSizing: "border-box", paddingLeft: 28, border: "1px solid var(--line-strong)", borderRadius: 4, padding: "6px 10px 6px 28px", background: "var(--panel)", color: "var(--fg)", fontSize: 13, outline: "none" }}
+        />
+      </div>
+
+      {/* Tag chips — applied first, then rest */}
+      {filtered.length > 0 && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: canCreate ? 10 : 0 }}>
+          {filtered.map(tg => {
+            const isAll  = appliedAll.has(tg.id);
+            const isSome = appliedSome.has(tg.id);
+            return (
+              <span key={tg.id}
+                style={{
+                  display: "inline-flex", alignItems: "center", gap: 5,
+                  height: 26, padding: "0 10px", borderRadius: 4, fontSize: 12,
+                  cursor: "pointer", userSelect: "none", transition: "opacity .12s",
+                  border: isAll ? `1.5px solid ${tagColor(tg)}` : isSome ? `1.5px dashed ${tagColor(tg)}` : "1.5px solid transparent",
+                  background: isAll ? tagColor(tg) : tagBg(tg),
+                  color: isAll ? "var(--bg)" : tagColor(tg),
+                  opacity: isSome ? 0.7 : 1,
+                }}
+                onClick={() => {
+                  if (isAll) { onRemoveTag?.(tg.id); }
+                  else { onApplyTag?.(tg.id); setQuery(""); }
+                }}
+                title={isAll ? (lang === "de" ? "Klicken zum Entfernen" : "Click to remove") : isSome ? (lang === "de" ? "Teils vergeben – klicken zum Hinzufügen" : "Partial – click to add to all") : undefined}
+              >
+                {isAll
+                  ? <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><polyline points="1.5 5 4 7.5 8.5 2.5"/></svg>
+                  : isSome
+                    ? <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><line x1="2" y1="5" x2="8" y2="5"/></svg>
+                    : <span style={{ width: 6, height: 6, borderRadius: "50%", background: tagColor(tg), flexShrink: 0 }} />
+                }
+                {tagLabel(tg, lang)}
+              </span>
+            );
+          })}
+        </div>
+      )}
+
+      {/* No results */}
+      {q && filtered.length === 0 && !canCreate && (
+        <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 8 }}>
+          {lang === "de" ? "Kein Tag gefunden." : "No tag found."}
+        </div>
+      )}
+
+      {/* Create option */}
+      {canCreate && (
+        <div style={{ borderTop: filtered.length ? "1px solid var(--line)" : "none", paddingTop: filtered.length ? 10 : 0 }}>
+          <button className="btn sm" style={{ gap: 6 }} onClick={handleCreate}>
+            <Icon.plus size={12} />
+            {lang === "de" ? `„${query.trim()}" erstellen` : `Create "${query.trim()}"`}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Bulk action bar — with inline tag / author / move pickers
-function BulkBar({ count, onClear, lang, onFavorite, onUnfavorite, onShare, onDelete, allFavorited, onApplyTag, onApplyAuthor, onMoveToFolder, folders }) {
+function MovePanel({ lang, folders, onMoveToFolder }) {
+  const [newName, setNewName] = useState("");
+  const [creating, setCreating] = useState(false);
+  const inputRef = useRef(null);
+  useEffect(() => { if (creating) inputRef.current?.focus(); }, [creating]);
+
+  function confirmCreate() {
+    const name = newName.trim();
+    if (!name) { setCreating(false); return; }
+    const id = window.createFolder?.(name);
+    if (id) onMoveToFolder?.(id);
+    setNewName(""); setCreating(false);
+  }
+
+  return (
+    <>
+      <div className="eyebrow" style={{ marginBottom: 10 }}>{lang === "de" ? "Auswahl verschieben nach" : "Move selection to"}</div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
+        {(folders || window.FOLDERS).map(f => (
+          <span key={f.id} className="chip" style={{ cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6 }}
+            onClick={() => onMoveToFolder?.(f.id)}>
+            <Icon.folder size={12} />
+            {f.name}
+          </span>
+        ))}
+        {creating ? (
+          <div style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "var(--hover)", borderRadius: 20, padding: "4px 10px" }}>
+            <Icon.folder size={12} />
+            <input
+              ref={inputRef}
+              value={newName}
+              onChange={e => setNewName(e.target.value)}
+              onKeyDown={e => { if (e.key === "Enter") confirmCreate(); if (e.key === "Escape") { setCreating(false); setNewName(""); } }}
+              onBlur={confirmCreate}
+              placeholder={lang === "de" ? "Name…" : "Name…"}
+              style={{ border: "none", background: "transparent", outline: "none", fontSize: 13, width: 120, color: "var(--fg)" }}
+            />
+          </div>
+        ) : (
+          <span className="chip" style={{ cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6, opacity: 0.6 }}
+            onClick={() => setCreating(true)}>
+            <Icon.plus size={12} />
+            {lang === "de" ? "Neue Sammlung" : "New collection"}
+          </span>
+        )}
+      </div>
+    </>
+  );
+}
+
+function BulkBar({ count, onClear, lang, onFavorite, onUnfavorite, onShare, onDelete, allFavorited, onApplyTag, onRemoveTag, onApplyAuthor, onMoveToFolder, folders, onDownload, selectedAssets }) {
   const t = makeT(lang);
   const [panel, setPanel] = useState(null);
+  const [confirmDel, setConfirmDel] = useState(false);
   const toggle = (name) => setPanel(p => p === name ? null : name);
 
   return (
@@ -491,29 +832,42 @@ function BulkBar({ count, onClear, lang, onFavorite, onUnfavorite, onShare, onDe
         <button className={"btn sm" + (panel === "move" ? " primary" : "")} onClick={() => toggle("move")}>
           <Icon.folder size={13} /> {t("bulk_move")}
         </button>
+        {onDownload && (
+          <button className="btn sm" onClick={() => { onDownload(); setPanel(null); }}>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ display: "block" }}>
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+              <polyline points="7 10 12 15 17 10"/>
+              <line x1="12" y1="15" x2="12" y2="3"/>
+            </svg>
+            {lang === "de" ? "Herunterladen" : "Download"}
+          </button>
+        )}
         <div style={{ flex: 1 }} />
-        <button className="btn sm" style={{ color: "var(--accent)" }} onClick={() => { onDelete(); setPanel(null); }}>
-          <Icon.trash size={13} /> {t("bulk_delete")}
-        </button>
+        {confirmDel ? (
+          <>
+            <span style={{ fontSize: 13, color: "var(--accent)" }}>
+              {lang === "de" ? `${count} Datei${count !== 1 ? "en" : ""} löschen?` : `Delete ${count} file${count !== 1 ? "s" : ""}?`}
+            </span>
+            <button className="btn sm" style={{ background: "var(--accent)", color: "#fff", border: "none" }}
+              onClick={() => { setConfirmDel(false); setPanel(null); onDelete(); }}>
+              {lang === "de" ? "Ja, löschen" : "Yes, delete"}
+            </button>
+            <button className="btn sm ghost" onClick={() => setConfirmDel(false)}>
+              {lang === "de" ? "Abbrechen" : "Cancel"}
+            </button>
+          </>
+        ) : (
+          <button className="btn sm" style={{ color: "var(--accent)" }} onClick={() => { setPanel(null); setConfirmDel(true); }}>
+            <Icon.trash size={13} /> {t("bulk_delete")}
+          </button>
+        )}
       </div>
 
       {/* Picker panels */}
       {panel && (
-        <div className="card" style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, zIndex: 60, padding: 16, boxShadow: "var(--shadow)" }}>
+        <div className="card" style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, zIndex: 60, padding: 16, boxShadow: "var(--shadow)", maxHeight: "60vh", overflowY: "auto" }}>
           {panel === "tag" && (
-            <>
-              <div className="eyebrow" style={{ marginBottom: 10 }}>{lang === "de" ? "Tag zu Auswahl hinzufügen" : "Add tag to selection"}</div>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                {window.TAGS.map(tg => (
-                  <span key={tg.id} className="chip" style={{ cursor: "pointer", background: tagBg(tg), color: tagColor(tg), borderColor: "transparent" }}
-                    onClick={() => { onApplyTag?.(tg.id); setPanel(null); }}>
-                    <span className="tag-dot" style={{ background: tagColor(tg) }} />
-                    {tagLabel(tg, lang)}
-                  </span>
-                ))}
-                {window.TAGS.length === 0 && <span style={{ color: "var(--muted)", fontSize: 13 }}>—</span>}
-              </div>
-            </>
+            <TagPickerPanel lang={lang} selectedAssets={selectedAssets} onApplyTag={(id) => { onApplyTag?.(id); setPanel(null); }} onRemoveTag={(id) => { onRemoveTag?.(id); }} />
           )}
 
           {panel === "author" && (
@@ -533,18 +887,7 @@ function BulkBar({ count, onClear, lang, onFavorite, onUnfavorite, onShare, onDe
           )}
 
           {panel === "move" && (
-            <>
-              <div className="eyebrow" style={{ marginBottom: 10 }}>{lang === "de" ? "Auswahl verschieben nach" : "Move selection to"}</div>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                {(folders || window.FOLDERS).map(f => (
-                  <span key={f.id} className="chip" style={{ cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6 }}
-                    onClick={() => { onMoveToFolder?.(f.id); setPanel(null); }}>
-                    <Icon.folder size={12} />
-                    {f.name}
-                  </span>
-                ))}
-              </div>
-            </>
+            <MovePanel lang={lang} folders={folders} onMoveToFolder={(id) => { onMoveToFolder?.(id); setPanel(null); }} />
           )}
         </div>
       )}

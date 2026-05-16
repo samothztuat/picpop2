@@ -292,6 +292,29 @@ function DevPanel({ open, onClose }) {
   const [expandedCommits, setExpandedCommits] = useStateDP(new Set());
   const gitSuccessTimer = useRefDP(null);
 
+  /* ── Direct deploy ── */
+  const [deployState,  setDeployState]  = useStateDP('idle'); // idle|running|success|error
+  const [deployLog,    setDeployLog]    = useStateDP('');
+
+  async function runDeploy() {
+    if (deployState === 'running') return;
+    setDeployState('running'); setDeployLog('');
+    try {
+      const res = await fetch('/api/deploy', { method: 'POST' });
+      const data = await res.json();
+      if (data.ok) {
+        setDeployState('success');
+        setDeployLog(data.output || '');
+      } else {
+        setDeployState('error');
+        setDeployLog(data.error || 'Deploy fehlgeschlagen');
+      }
+    } catch (_) {
+      setDeployState('error');
+      setDeployLog('Netzwerkfehler — läuft der Dev-Server?');
+    }
+  }
+
   /* ── CI deploy status ── */
   const [ciState, setCiState]       = useStateDP('idle');
   const [ciRunUrl, setCiRunUrl]     = useStateDP(null);
@@ -748,6 +771,69 @@ function DevPanel({ open, onClose }) {
                 </div>
               )}
             </div>
+
+            {/* Deploy section */}
+            {isDevMode && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '0.12em', color: 'var(--muted)' }}>
+                    Firebase Hosting deployen
+                  </div>
+                  {deployState === 'success' && (
+                    <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', padding: '2px 8px', background: 'oklch(0.45 0.13 145 / 0.08)', color: 'oklch(0.45 0.13 145)', border: '1px solid oklch(0.45 0.13 145 / 0.30)', letterSpacing: '0.06em' }}>
+                      ✓ LIVE
+                    </span>
+                  )}
+                  {deployState === 'error' && (
+                    <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', padding: '2px 8px', background: 'oklch(0.52 0.18 25 / 0.08)', color: 'oklch(0.52 0.18 25)', border: '1px solid oklch(0.52 0.18 25 / 0.30)', letterSpacing: '0.06em' }}>
+                      ✗ FEHLER
+                    </span>
+                  )}
+                </div>
+
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <div style={{ flex: 1, fontSize: 11, color: 'var(--faint)', lineHeight: 1.5 }}>
+                    Veröffentlicht alle lokalen Dateien auf{' '}
+                    <a href="https://picpop-bilddatenbank.web.app" target="_blank" rel="noreferrer"
+                      style={{ color: 'var(--muted)', textDecoration: 'underline' }}>
+                      picpop-bilddatenbank.web.app
+                    </a>
+                    {' '}über Firebase CLI.
+                  </div>
+                  <button
+                    onClick={runDeploy}
+                    disabled={deployState === 'running'}
+                    style={{ all: 'unset', cursor: deployState === 'running' ? 'not-allowed' : 'pointer', padding: '10px 20px', background: deployState === 'running' ? 'var(--line-strong)' : deployState === 'success' ? 'oklch(0.45 0.13 145)' : deployState === 'error' ? 'oklch(0.52 0.18 25)' : 'var(--fg)', color: 'var(--bg)', fontSize: 13, fontWeight: 500, flexShrink: 0, opacity: deployState === 'running' ? 0.6 : 1, transition: 'background 120ms', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 6 }}
+                  >
+                    {deployState === 'running' && (
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" style={{ animation: 'spin 1s linear infinite', flexShrink: 0 }}>
+                        <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
+                      </svg>
+                    )}
+                    {deployState === 'idle'    && '🚀 Jetzt deployen'}
+                    {deployState === 'running' && 'Deployt…'}
+                    {deployState === 'success' && '✓ Nochmals deployen'}
+                    {deployState === 'error'   && '↻ Erneut versuchen'}
+                  </button>
+                </div>
+
+                {(deployState === 'success' || deployState === 'error') && deployLog && (
+                  <div style={{ background: 'var(--bg)', border: `1px solid ${deployState === 'success' ? 'oklch(0.45 0.13 145 / 0.25)' : 'oklch(0.52 0.18 25 / 0.25)'}`, padding: '10px 12px', fontSize: 11, fontFamily: 'var(--font-mono)', color: deployState === 'success' ? 'oklch(0.40 0.12 145)' : 'oklch(0.50 0.14 25)', lineHeight: 1.5, whiteSpace: 'pre-wrap', maxHeight: 180, overflowY: 'auto' }}>
+                    {deployLog.split('\n').slice(-20).join('\n')}
+                  </div>
+                )}
+                {deployState === 'success' && (
+                  <div style={{ fontSize: 11, color: 'oklch(0.40 0.12 145)', fontFamily: 'var(--font-mono)' }}>
+                    ✓ Live auf{' '}
+                    <a href="https://picpop-bilddatenbank.web.app" target="_blank" rel="noreferrer"
+                      style={{ color: 'inherit', fontWeight: 500 }}>
+                      picpop-bilddatenbank.web.app
+                    </a>
+                    {' '}— Kunden sehen jetzt die aktuelle Version.
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Commit list */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>

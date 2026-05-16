@@ -3,12 +3,13 @@
 const { useState: useStateA, useEffect: useEffectA, useMemo: useMemoA, useRef: useRefA } = React;
 
 // ── FolderRow ────────────────────────────────────────────────────────────────
-function FolderRow({ folder, active, onOpen, onRename, onDelete, onPin, onMoveAssets, onDragStart, onDragOver, onDrop, dragOverHint, lang, liveCount }) {
+function FolderRow({ folder, active, onOpen, onRename, onDelete, onPin, onMoveAssets, onMoveFolder, allFolders, onDragStart, onDragOver, onDrop, dragOverHint, lang, liveCount, hasChildren, isExpanded, onToggleExpand }) {
   const t = window.makeT(lang);
   const [editing, setEditing] = useStateA(false);
   const [name, setName] = useStateA(folder.name);
   const [menu, setMenu] = useStateA(false);
   const [confirmDel, setConfirmDel] = useStateA(false);
+  const [showMove, setShowMove] = useStateA(false);
   const inputRef = useRefA(null);
 
   useEffectA(() => { setName(folder.name); }, [folder.name]);
@@ -21,7 +22,7 @@ function FolderRow({ folder, active, onOpen, onRename, onDelete, onPin, onMoveAs
     setEditing(false);
   }
 
-  function closeMenu() { setMenu(false); setConfirmDel(false); }
+  function closeMenu() { setMenu(false); setConfirmDel(false); setShowMove(false); }
 
   return (
     <div
@@ -31,10 +32,12 @@ function FolderRow({ folder, active, onOpen, onRename, onDelete, onPin, onMoveAs
       onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; onDragOver(folder.id); }}
       onDrop={(e) => {
         e.preventDefault();
+        e.stopPropagation(); // don't bubble to container (would reset to top-level)
         const assetData = e.dataTransfer.getData("application/picpop-assets");
         if (assetData) {
           try { onMoveAssets?.(JSON.parse(assetData), folder.id); } catch (_) {}
         } else {
+          // Another folder dropped on this one → nest it
           onDrop(folder.id);
         }
       }}
@@ -42,6 +45,18 @@ function FolderRow({ folder, active, onOpen, onRename, onDelete, onPin, onMoveAs
       onDoubleClick={(e) => { e.stopPropagation(); setEditing(true); }}
       style={{ position: "relative" }}
     >
+      {hasChildren ? (
+        <button
+          onClick={(e) => { e.stopPropagation(); onToggleExpand?.(folder.id); }}
+          style={{ all: "unset", cursor: "pointer", width: 14, height: 14, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, color: "var(--muted)", marginRight: -2 }}
+        >
+          <svg width="8" height="8" viewBox="0 0 8 8" style={{ transform: isExpanded ? "rotate(90deg)" : "rotate(0deg)", transition: "transform 0.15s" }}>
+            <path d="M2 1l4 3-4 3" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
+        </button>
+      ) : (
+        <span style={{ width: 14, flexShrink: 0 }} />
+      )}
       <window.Icon.folder size={13} />
       {editing ? (
         <input
@@ -101,6 +116,33 @@ function FolderRow({ folder, active, onOpen, onRename, onDelete, onPin, onMoveAs
                 <div className="menu-item" onClick={() => { closeMenu(); onOpen(folder.id); }}>
                   <window.Icon.eye size={12} /> {t("open")}
                 </div>
+                {!["f-unsorted", "p-unsorted"].includes(folder.id) && onMoveFolder && (
+                  <div>
+                    <div className="menu-item" onClick={(e) => { e.stopPropagation(); setShowMove(v => !v); setConfirmDel(false); }}>
+                      <window.Icon.folder size={12} /> {lang === "de" ? "Verschieben nach…" : "Move to…"}
+                      <span style={{ marginLeft: "auto", opacity: 0.5 }}>{showMove ? "▲" : "▶"}</span>
+                    </div>
+                    {showMove && (
+                      <div style={{ borderTop: "1px solid var(--line)", maxHeight: 180, overflowY: "auto" }}>
+                        {folder.parent && (
+                          <div className="menu-item" onClick={() => { closeMenu(); onMoveFolder(folder.id, null); }}
+                            style={{ paddingLeft: 20, fontSize: 12 }}>
+                            <window.Icon.arrowL size={11} /> {lang === "de" ? "Oberste Ebene" : "Top level"}
+                          </div>
+                        )}
+                        {(allFolders || [])
+                          .filter(f => f.id !== folder.id && f.id !== folder.parent && !["f-unsorted","p-unsorted"].includes(f.id))
+                          .map(f => (
+                            <div key={f.id} className="menu-item" style={{ paddingLeft: 20, fontSize: 12 }}
+                              onClick={() => { closeMenu(); onMoveFolder(folder.id, f.id); }}>
+                              <window.Icon.folder size={11} /> {f.name}
+                            </div>
+                          ))
+                        }
+                      </div>
+                    )}
+                  </div>
+                )}
                 {!["f-unsorted", "p-unsorted"].includes(folder.id) && (
                   <div className="menu-item danger" onClick={(e) => { e.stopPropagation(); setConfirmDel(true); }}>
                     <window.Icon.trash size={12} /> {t("delete")}
@@ -115,20 +157,125 @@ function FolderRow({ folder, active, onOpen, onRename, onDelete, onPin, onMoveAs
   );
 }
 
+// ── TagCollectionRow ─────────────────────────────────────────────────────────
+function TagCollectionRow({ col, active, onClick, onRename, onDelete, lang }) {
+  const [menu, setMenu] = useStateA(false);
+  const [editing, setEditing] = useStateA(false);
+  const [name, setName] = useStateA(col.name);
+  const [confirmDel, setConfirmDel] = useStateA(false);
+  const inputRef = useRefA(null);
+
+  useEffectA(() => { setName(col.name); }, [col.name]);
+  useEffectA(() => { if (editing) inputRef.current?.select(); }, [editing]);
+
+  function commit() {
+    const v = name.trim();
+    if (v && v !== col.name) onRename?.(col.id, v);
+    else setName(col.name);
+    setEditing(false);
+  }
+
+  // Build a compact filter summary (tag names + year)
+  const filterSummary = (() => {
+    const parts = [];
+    (col.filterTags || []).forEach(tid => {
+      const tg = window.tagById?.(tid);
+      if (tg) parts.push(window.tagLabel?.(tg, lang) || tg.name);
+    });
+    if (col.filterYear) parts.push(String(col.filterYear));
+    if (col.filterAuthor) parts.push(col.filterAuthor.split(" ")[0]);
+    return parts.slice(0, 4).join(" · ");
+  })();
+
+  return (
+    <div
+      className={"nav-item folder-row" + (active ? " active" : "")}
+      onClick={() => !editing && onClick(col)}
+      style={{ position: "relative", flexDirection: "column", alignItems: "flex-start", padding: "5px 8px 5px 10px", gap: 0 }}
+    >
+      <div className="row" style={{ width: "100%", gap: 6 }}>
+        <span style={{ width: 14, flexShrink: 0 }} />
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, color: "var(--accent)", opacity: 0.8 }}>
+          <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/>
+          <line x1="7" y1="7" x2="7.01" y2="7"/>
+        </svg>
+        {editing ? (
+          <input ref={inputRef} value={name} onChange={e => setName(e.target.value)}
+            onBlur={commit} onClick={e => e.stopPropagation()}
+            onKeyDown={e => { if (e.key === "Enter") commit(); if (e.key === "Escape") { setName(col.name); setEditing(false); } }}
+            style={{ flex: 1, minWidth: 0, border: "1px solid var(--accent)", borderRadius: 3, padding: "2px 6px", background: "var(--panel)", color: "var(--fg)", outline: "none", fontSize: 13, marginLeft: -4 }}
+          />
+        ) : (
+          <span className="clamp-1" style={{ flex: 1, minWidth: 0, fontSize: 13 }}>{col.name}</span>
+        )}
+        <button className="folder-more" onClick={e => { e.stopPropagation(); setMenu(v => !v); setConfirmDel(false); }} aria-label="more">
+          <window.Icon.more size={12} />
+        </button>
+      </div>
+      {filterSummary && !editing && (
+        <div style={{ paddingLeft: 32, fontSize: 10, color: "var(--muted)", fontFamily: "var(--font-mono)", marginTop: 1, lineHeight: 1.3 }} className="clamp-1">
+          {filterSummary}
+        </div>
+      )}
+      {menu && (
+        <>
+          <div style={{ position: "fixed", inset: 0, zIndex: 30 }} onClick={e => { e.stopPropagation(); setMenu(false); setConfirmDel(false); }} />
+          <div className="card" style={{ position: "absolute", right: 0, top: "100%", zIndex: 31, marginTop: 4, minWidth: 160, boxShadow: "var(--shadow)", padding: 4 }} onClick={e => e.stopPropagation()}>
+            {confirmDel ? (
+              <div style={{ padding: "8px 10px" }}>
+                <div style={{ fontSize: 12, color: "var(--fg)", marginBottom: 8 }}>{lang === "de" ? "Sammlung löschen?" : "Delete collection?"}</div>
+                <div style={{ display: "flex", gap: 6 }}>
+                  <button style={{ all: "unset", cursor: "pointer", flex: 1, textAlign: "center", padding: "5px 0", fontSize: 12, background: "var(--accent)", color: "#fff", borderRadius: 3 }}
+                    onClick={() => { setMenu(false); setConfirmDel(false); onDelete?.(col.id); }}>
+                    {lang === "de" ? "Löschen" : "Delete"}
+                  </button>
+                  <button style={{ all: "unset", cursor: "pointer", flex: 1, textAlign: "center", padding: "5px 0", fontSize: 12, border: "1px solid var(--line-strong)", borderRadius: 3, color: "var(--muted)" }}
+                    onClick={() => setConfirmDel(false)}>
+                    {lang === "de" ? "Abbrechen" : "Cancel"}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <>
+                <div className="menu-item" onClick={() => { setMenu(false); setEditing(true); }}>
+                  <window.Icon.edit size={12} /> {lang === "de" ? "Umbenennen" : "Rename"}
+                </div>
+                <div className="menu-item danger" onClick={e => { e.stopPropagation(); setConfirmDel(true); }}>
+                  <window.Icon.trash size={12} /> {lang === "de" ? "Löschen" : "Delete"}
+                </div>
+              </>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 // ── Sidebar ──────────────────────────────────────────────────────────────────
-function Sidebar({ area, setArea, folders, route, setRoute, lang, onUpload, onCreateFolder, onRenameFolder, onDeleteFolder, onPinFolder, onReorderFolders, onMoveAssets, onDevOpen, assets, currentUser, onSignOut }) {
+function Sidebar({ area, setArea, folders, route, setRoute, lang, onUpload, onCreateFolder, onRenameFolder, onDeleteFolder, onPinFolder, onReorderFolders, onMoveAssets, onMoveAssetsToArea, onMoveFolder, onDevOpen, assets, currentUser, companyName, onSignOut, tagCollections, onLoadTagCollection, onDeleteTagCollection, onRenameTagCollection, activeTagColId, collapsed, onCollapse, onResize }) {
   const t = window.makeT(lang);
   const [creating, setCreating] = useStateA(false);
   const [newName, setNewName] = useStateA("");
   const newInputRef = useRefA(null);
   const [dragId, setDragId] = useStateA(null);
   const [overId, setOverId] = useStateA(null);
+  const [areaDropOver, setAreaDropOver] = useStateA(null); // "images" | "print" | null
+  const [creatingCategory, setCreatingCategory] = useStateA("kampagne"); // for print: which section
+  const [expandedIds, setExpandedIds] = useStateA(() => new Set());
+  const [lineOverId, setLineOverId] = useStateA(null); // folder id whose "before" line is hovered
+
+  const toggleExpand = (id) => setExpandedIds(prev => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
 
   useEffectA(() => { if (creating) newInputRef.current?.focus(); }, [creating]);
 
   function commitNew() {
     const v = newName.trim();
-    if (v) onCreateFolder(v);
+    if (v) onCreateFolder(v, creatingCategory);
     setNewName("");
     setCreating(false);
   }
@@ -136,190 +283,433 @@ function Sidebar({ area, setArea, folders, route, setRoute, lang, onUpload, onCr
   const baseRoute = route.split(":")[0];
   const detailId = route.split(":")[1];
 
+  const col = collapsed; // shorthand
+
+  // Resize handle drag logic
+  const sidebarRef = useRefA(null);
+  function startResize(e) {
+    if (col) return;
+    e.preventDefault();
+    const startX = e.clientX;
+    const startW = sidebarRef.current?.getBoundingClientRect().width || 240;
+    function onMove(ev) {
+      const w = startW + ev.clientX - startX;
+      if (w < 100) { onCollapse(true); return; }
+      onResize(w);
+    }
+    function onUp() {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    }
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  }
+
   return (
-    <aside className="sidebar">
-      {/* Brand */}
-      <div style={{ padding: "16px 16px 12px" }}>
-        <div className="row" style={{ gap: 10 }}>
-          <div style={{ width: 28, height: 28, background: "var(--fg)", color: "var(--bg)", borderRadius: 4, display: "inline-flex", alignItems: "center", justifyContent: "center", fontFamily: "var(--font-mono)", fontWeight: 600 }}>p</div>
-          <div>
-            <div style={{ fontWeight: 600, fontSize: 14, letterSpacing: "-0.01em" }}>picpop</div>
-            <div className="mono" style={{ color: "var(--muted)", fontSize: 9 }}>Köhler & Co.</div>
-          </div>
-        </div>
+    <aside ref={sidebarRef} className="sidebar" style={{ position: "relative", overflow: "visible" }}>
+      {/* Drag-to-resize / collapse handle on right edge */}
+      <div
+        className="sidebar-resize-handle"
+        onPointerDown={startResize}
+        onDoubleClick={() => onCollapse(!col)}
+        style={{ cursor: col ? "e-resize" : "col-resize" }}
+        title={col ? (lang === "de" ? "Aufklappen" : "Expand") : (lang === "de" ? "Ziehen zum Skalieren · Doppelklick zum Einklappen" : "Drag to resize · double-click to collapse")}
+      >
+        <div className="sidebar-resize-line" />
       </div>
 
+      {/* Brand */}
+      {col ? (
+        <div style={{ padding: "14px 0 10px", display: "flex", justifyContent: "center" }}>
+          <div
+            style={{ width: 28, height: 28, background: "var(--fg)", color: "var(--bg)", borderRadius: 4, display: "inline-flex", alignItems: "center", justifyContent: "center", fontFamily: "var(--font-mono)", fontWeight: 600, cursor: "pointer", flexShrink: 0 }}
+            onClick={() => onCollapse(false)}
+            title="picpop – aufklappen"
+          >p</div>
+        </div>
+      ) : (
+        <div style={{ padding: "16px 16px 12px" }}>
+          <div className="row" style={{ gap: 10 }}>
+            <div style={{ width: 28, height: 28, background: "var(--fg)", color: "var(--bg)", borderRadius: 4, display: "inline-flex", alignItems: "center", justifyContent: "center", fontFamily: "var(--font-mono)", fontWeight: 600 }}>p</div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontWeight: 600, fontSize: 14, letterSpacing: "-0.01em" }}>picpop</div>
+              {(companyName || window.TENANT_ID) && (
+                <div className="mono" style={{ color: "var(--muted)", fontSize: 9 }}>{companyName || window.TENANT_ID}</div>
+              )}
+            </div>
+            {/* Collapse toggle */}
+            <button
+              className="btn icon ghost sm"
+              onClick={() => onCollapse(true)}
+              title={lang === "de" ? "Einklappen" : "Collapse"}
+              style={{ color: "var(--faint)", flexShrink: 0 }}
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M15 18l-6-6 6-6"/></svg>
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Area switcher */}
-      <div style={{ padding: "0 12px 8px" }}>
-        <div className="area-switcher">
-          <button className={"area-tab" + (area === "images" ? " active" : "")} onClick={() => setArea("images")}>
-            <window.Icon.image size={13} />
-            <span>{lang === "de" ? "Bilder" : "Images"}</span>
-          </button>
-          <button className={"area-tab" + (area === "print" ? " active" : "")} onClick={() => setArea("print")}>
-            <window.Icon.pdf size={13} />
-            <span>Print</span>
-          </button>
+      <div style={{ padding: col ? "0 6px 8px" : "0 12px 8px" }}>
+        <div className="area-switcher" style={col ? { gridTemplateColumns: "1fr", gap: 2 } : undefined}>
+          {["images", "print"].map(tab => {
+            const isActive = area === tab;
+            const isDragTarget = areaDropOver === tab && !isActive;
+            function handleAreaDragOver(e) {
+              if (isActive) return;
+              if (!e.dataTransfer.types.includes("application/picpop-assets")) return;
+              e.preventDefault();
+              e.dataTransfer.dropEffect = "move";
+              setAreaDropOver(tab);
+            }
+            function handleAreaDrop(e) {
+              e.preventDefault();
+              setAreaDropOver(null);
+              if (isActive) return;
+              const raw = e.dataTransfer.getData("application/picpop-assets");
+              if (!raw) return;
+              try { onMoveAssetsToArea?.(JSON.parse(raw), tab); } catch (_) {}
+            }
+            return (
+              <button key={tab}
+                className={"area-tab" + (isActive ? " active" : "")}
+                style={{ ...(isDragTarget ? { outline: "2px solid var(--accent)", outlineOffset: -2, background: "var(--accent-soft)" } : {}), ...(col ? { justifyContent: "center", padding: "6px 0" } : {}) }}
+                onClick={() => setArea(tab)}
+                onDragOver={handleAreaDragOver}
+                onDragLeave={() => setAreaDropOver(null)}
+                onDrop={handleAreaDrop}
+                title={col ? (tab === "images" ? (lang === "de" ? "Bilder" : "Images") : "Print") : undefined}
+              >
+                {tab === "images" ? <window.Icon.image size={13} /> : <window.Icon.pdf size={13} />}
+                {!col && <span>{tab === "images" ? (lang === "de" ? "Bilder" : "Images") : "Print"}</span>}
+              </button>
+            );
+          })}
         </div>
       </div>
 
       {/* Upload */}
-      <div style={{ padding: "8px 12px 12px" }}>
-        <button className="btn primary" style={{ width: "100%", justifyContent: "center" }} onClick={onUpload}>
-          <window.Icon.upload size={14} /> {t("upload")}
+      <div style={{ padding: col ? "4px 6px 8px" : "8px 12px 12px" }}>
+        <button className="btn primary" style={{ width: "100%", justifyContent: "center" }} onClick={onUpload} title={col ? t("upload") : undefined}>
+          <window.Icon.upload size={14} />
+          {!col && <span style={{ marginLeft: 6 }}>{t("upload")}</span>}
         </button>
       </div>
 
-      <nav className="scroll" style={{ padding: "4px 8px 12px", flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
+      <nav className="scroll" style={{ padding: col ? "4px 4px 12px" : "4px 8px 12px", flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
         {/* Overview links */}
-        <div className="nav-item" onClick={() => setRoute("recent")} data-active={baseRoute === "recent"}>
+        <div className="nav-item" onClick={() => setRoute("recent")} data-active={baseRoute === "recent"} style={col ? { justifyContent: "center", padding: "7px 0" } : undefined} title={col ? "Home" : undefined}>
           <svg width="13" height="13" viewBox="0 0 16 16" fill="none" style={{ flexShrink: 0 }}>
             <path d="M8 1.5L1.5 7v7h4.5v-4h4v4h4.5V7L8 1.5z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" fill="none"/>
           </svg>
-          <span>Home</span>
+          {!col && <span>Home</span>}
         </div>
-        <div className="nav-item" onClick={() => setRoute("favorites")} data-active={baseRoute === "favorites"}>
+        <div className="nav-item" onClick={() => setRoute("favorites")} data-active={baseRoute === "favorites"} style={col ? { justifyContent: "center", padding: "7px 0" } : undefined} title={col ? t("nav_favorites") : undefined}>
           <window.Icon.star size={13} />
-          <span>{t("nav_favorites")}</span>
-          <span className="count num">{window.__favorites?.size || 0}</span>
+          {!col && <span>{t("nav_favorites")}</span>}
+          {!col && <span className="count num">{window.__favorites?.size || 0}</span>}
         </div>
-        <div className="nav-item" onClick={() => setRoute("uploads")} data-active={baseRoute === "uploads"}>
+        <div className="nav-item" onClick={() => setRoute("uploads")} data-active={baseRoute === "uploads"} style={col ? { justifyContent: "center", padding: "7px 0" } : undefined} title={col ? t("nav_uploads") : undefined}>
           <window.Icon.upload size={13} />
-          <span>{t("nav_uploads")}</span>
+          {!col && <span>{t("nav_uploads")}</span>}
         </div>
-        <div className="nav-item" onClick={() => setRoute("all")} data-active={baseRoute === "all"}>
-          <window.Icon.grid size={13} />
-          <span>{area === "print" ? t("nav_all_pdfs") : t("nav_all_images")}</span>
-          <span className="count num">{assets.filter(a => area === "print" ? a.kind === "pdf" : a.kind !== "pdf").length}</span>
+        <div className="nav-item" onClick={() => { setArea("images"); setRoute("all"); }} data-active={baseRoute === "all" && area === "images"} style={col ? { justifyContent: "center", padding: "7px 0" } : undefined} title={col ? (lang === "de" ? "Alle Bilder" : "All images") : undefined}>
+          <window.Icon.image size={13} />
+          {!col && <span>{lang === "de" ? "Alle Bilder" : "All images"}</span>}
         </div>
+        <div className="nav-item" onClick={() => { setArea("print"); setRoute("all"); }} data-active={baseRoute === "all" && area === "print"} style={col ? { justifyContent: "center", padding: "7px 0" } : undefined} title={col ? (lang === "de" ? "Alles Print" : "All print") : undefined}>
+          <window.Icon.pdf size={13} />
+          {!col && <span>{lang === "de" ? "Alles Print" : "All print"}</span>}
+        </div>
+        {!col && (area === "print" ? (() => {
+          // Split pdfFolders into Kampagnen + Literatur
+          const kampagneFolders = folders.filter(f => !f.category || f.category === "kampagne");
+          const literaturFolders = folders.filter(f => f.category === "literatur");
+          const newInput = (cat) => creating && creatingCategory === cat && (
+            <div className="nav-item folder-row" style={{ background: "var(--hover)" }}>
+              <window.Icon.folder size={13} />
+              <input ref={newInputRef} value={newName} onChange={(e) => setNewName(e.target.value)}
+                onBlur={commitNew}
+                onKeyDown={(e) => { if (e.key === "Enter") commitNew(); if (e.key === "Escape") { setNewName(""); setCreating(false); } }}
+                placeholder={lang === "de" ? "Name…" : "Name…"}
+                style={{ flex: 1, minWidth: 0, border: "1px solid var(--accent)", borderRadius: 3, padding: "2px 6px", background: "var(--panel)", color: "var(--fg)", outline: "none", fontSize: 13, marginLeft: -4 }}
+              />
+            </div>
+          );
+          // Build depth-first flat tree for a folder list (respects expandedIds)
+          const flatTree = (list) => {
+            const byId = {};
+            list.forEach(f => { byId[f.id] = { ...f, _children: [] }; });
+            const roots = [];
+            list.forEach(f => {
+              if (f.parent && byId[f.parent]) byId[f.parent]._children.push(byId[f.id]);
+              else roots.push(byId[f.id]);
+            });
+            const out = [];
+            const walk = (nodes, depth) => nodes.forEach(n => {
+              const hasChildren = n._children.length > 0;
+              const isExpanded = expandedIds.has(n.id);
+              out.push({ f: n, depth, hasChildren, isExpanded });
+              if (hasChildren && isExpanded) walk(n._children, depth + 1);
+            });
+            walk(roots, 0);
+            return out;
+          };
+          const folderList = (list, routeBase) => (
+            <div onDragOver={(e) => e.preventDefault()}
+              onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setOverId(null); }}
+              onDrop={(e) => {
+                e.preventDefault();
+                // Dropped on background → move dragged folder to top level
+                if (dragId) onMoveFolder?.(dragId, null);
+                setDragId(null); setOverId(null);
+              }}>
+              {flatTree(list).map(({ f, depth, hasChildren, isExpanded }) => (
+                <div key={f.id} style={{ paddingLeft: depth * 14 }}>
+                  {/* Drop line for reordering — visible only while dragging */}
+                  {dragId && dragId !== f.id && (
+                    <div
+                      onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setLineOverId(f.id); setOverId(null); }}
+                      onDragLeave={() => setLineOverId(null)}
+                      onDrop={(e) => { e.preventDefault(); e.stopPropagation(); if (dragId) onReorderFolders?.(dragId, f.id); setDragId(null); setOverId(null); setLineOverId(null); }}
+                      style={{ height: 4, margin: "1px 4px", borderRadius: 2, background: lineOverId === f.id ? "var(--accent)" : "transparent", transition: "background 0.1s" }}
+                    />
+                  )}
+                  <FolderRow folder={f}
+                    liveCount={(assets || window.ASSETS || []).filter(a => a.folderId === f.id).length}
+                    active={baseRoute === routeBase && detailId === f.id}
+                    dragOverHint={overId === f.id && dragId !== f.id && dragId !== null}
+                    hasChildren={hasChildren} isExpanded={isExpanded} onToggleExpand={toggleExpand}
+                    onOpen={(id) => setRoute(routeBase + ":" + id)}
+                    onRename={onRenameFolder} onDelete={onDeleteFolder} onPin={onPinFolder}
+                    onMoveAssets={(ids, folderId) => { onMoveAssets?.(ids, folderId); setOverId(null); }}
+                    onMoveFolder={onMoveFolder} allFolders={list}
+                    onDragStart={(id) => setDragId(id)} onDragOver={(id) => setOverId(id)}
+                    onDrop={(id) => { if (dragId && dragId !== id) onMoveFolder?.(dragId, id); setDragId(null); setOverId(null); }}
+                    lang={lang}
+                  />
+                </div>
+              ))}
+            </div>
+          );
+          const sectionHeader = (label, cat) => (
+            <div className="row" style={{ padding: "16px 10px 6px", justifyContent: "space-between", alignItems: "center" }}>
+              <div className="eyebrow">{label}</div>
+              <button className="btn icon ghost" style={{ width: 20, height: 20 }} title={t("new_folder")}
+                onClick={() => { setCreatingCategory(cat); setCreating(true); }}>
+                <window.Icon.plus size={12} />
+              </button>
+            </div>
+          );
+          return (
+            <>
+              {sectionHeader(lang === "de" ? "Kampagnen" : "Campaigns", "kampagne")}
+              <div className={"nav-item" + (baseRoute === "pdfs" && !detailId ? " active" : "")}
+                onClick={() => setRoute("pdfs")}>
+                <window.Icon.grid size={13} />
+                <span>{lang === "de" ? "Alle Kampagnen" : "All campaigns"}</span>
+                <span className="count">{kampagneFolders.length}</span>
+              </div>
+              {newInput("kampagne")}
+              {folderList(kampagneFolders, "pdfs")}
 
-        {/* Folder section */}
-        <div className="row" style={{ padding: "16px 10px 6px", justifyContent: "space-between", alignItems: "center" }}>
-          <div className="eyebrow">{lang === "de" ? "Sammlungen" : "Collections"}</div>
-          <button className="btn icon ghost" style={{ width: 20, height: 20 }} onClick={() => setCreating(true)} title={t("new_folder")}>
-            <window.Icon.plus size={12} />
-          </button>
-        </div>
+              {sectionHeader(lang === "de" ? "Literatur" : "Literature", "literatur")}
+              <div className={"nav-item" + (baseRoute === "literatur" && !detailId ? " active" : "")}
+                onClick={() => setRoute("literatur")}>
+                <window.Icon.grid size={13} />
+                <span>{lang === "de" ? "Alle Literatur" : "All literature"}</span>
+                <span className="count">{literaturFolders.length}</span>
+              </div>
+              {newInput("literatur")}
+              {folderList(literaturFolders, "literatur")}
+            </>
+          );
+        })() : (
+          // IMAGES area — single "Sammlungen" section
+          <>
+            <div className="row" style={{ padding: "16px 10px 6px", justifyContent: "space-between", alignItems: "center" }}>
+              <div className="eyebrow">{lang === "de" ? "Sammlungen" : "Collections"}</div>
+              <button className="btn icon ghost" style={{ width: 20, height: 20 }} onClick={() => setCreating(true)} title={t("new_folder")}>
+                <window.Icon.plus size={12} />
+              </button>
+            </div>
+            <div className={"nav-item" + (baseRoute === "folders" && !detailId ? " active" : "")}
+              onClick={() => setRoute("folders")}>
+              <window.Icon.grid size={13} />
+              <span>{lang === "de" ? "Alle Sammlungen" : "All collections"}</span>
+              <span className="count">{folders.length}</span>
+            </div>
+            {creating && (
+              <div className="nav-item folder-row" style={{ background: "var(--hover)" }}>
+                <window.Icon.folder size={13} />
+                <input ref={newInputRef} value={newName} onChange={(e) => setNewName(e.target.value)}
+                  onBlur={commitNew}
+                  onKeyDown={(e) => { if (e.key === "Enter") commitNew(); if (e.key === "Escape") { setNewName(""); setCreating(false); } }}
+                  placeholder={lang === "de" ? "Ordnername…" : "Folder name…"}
+                  style={{ flex: 1, minWidth: 0, border: "1px solid var(--accent)", borderRadius: 3, padding: "2px 6px", background: "var(--panel)", color: "var(--fg)", outline: "none", fontSize: 13, marginLeft: -4 }}
+                />
+              </div>
+            )}
+            <div onDragOver={(e) => e.preventDefault()}
+              onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setOverId(null); }}
+              onDrop={(e) => {
+                e.preventDefault();
+                if (dragId) onMoveFolder?.(dragId, null);
+                setDragId(null); setOverId(null);
+              }}>
+              {(() => {
+                const byId = {};
+                folders.forEach(f => { byId[f.id] = { ...f, _children: [] }; });
+                const roots = [];
+                folders.forEach(f => { if (f.parent && byId[f.parent]) byId[f.parent]._children.push(byId[f.id]); else roots.push(byId[f.id]); });
+                const flat = [];
+                const walk = (nodes, depth) => nodes.forEach(n => {
+                  const hasChildren = n._children.length > 0;
+                  const isExpanded = expandedIds.has(n.id);
+                  flat.push({ f: n, depth, hasChildren, isExpanded });
+                  if (hasChildren && isExpanded) walk(n._children, depth + 1);
+                });
+                walk(roots, 0);
+                return flat.map(({ f, depth, hasChildren, isExpanded }) => (
+                  <div key={f.id} style={{ paddingLeft: depth * 14 }}>
+                    {dragId && dragId !== f.id && (
+                      <div
+                        onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setLineOverId(f.id); setOverId(null); }}
+                        onDragLeave={() => setLineOverId(null)}
+                        onDrop={(e) => { e.preventDefault(); e.stopPropagation(); if (dragId) onReorderFolders?.(dragId, f.id); setDragId(null); setOverId(null); setLineOverId(null); }}
+                        style={{ height: 4, margin: "1px 4px", borderRadius: 2, background: lineOverId === f.id ? "var(--accent)" : "transparent", transition: "background 0.1s" }}
+                      />
+                    )}
+                    <FolderRow folder={f}
+                      liveCount={(assets || window.ASSETS || []).filter(a => a.folderId === f.id).length}
+                      active={baseRoute === "folders" && detailId === f.id}
+                      dragOverHint={overId === f.id && dragId !== f.id && dragId !== null}
+                      hasChildren={hasChildren} isExpanded={isExpanded} onToggleExpand={toggleExpand}
+                      onOpen={(id) => setRoute("folders:" + id)}
+                      onRename={onRenameFolder} onDelete={onDeleteFolder} onPin={onPinFolder}
+                      onMoveAssets={(ids, folderId) => { onMoveAssets?.(ids, folderId); setOverId(null); }}
+                      onMoveFolder={onMoveFolder} allFolders={folders}
+                      onDragStart={(id) => setDragId(id)} onDragOver={(id) => setOverId(id)}
+                      onDrop={(id) => { if (dragId && dragId !== id) onMoveFolder?.(dragId, id); setDragId(null); setOverId(null); }}
+                      lang={lang}
+                    />
+                  </div>
+                ));
+              })()}
+              {folders.length === 0 && (
+                <div style={{ padding: "8px 10px", color: "var(--muted)", fontSize: 12 }}>
+                  {lang === "de" ? "Keine Ordner. Lege einen neuen an." : "No folders yet. Create one."}
+                </div>
+              )}
+            </div>
+          </>
+        ))}
 
-        {creating && (
-          <div className="nav-item folder-row" style={{ background: "var(--hover)" }}>
-            <window.Icon.folder size={13} />
-            <input
-              ref={newInputRef}
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-              onBlur={commitNew}
-              onKeyDown={(e) => { if (e.key === "Enter") commitNew(); if (e.key === "Escape") { setNewName(""); setCreating(false); } }}
-              placeholder={lang === "de" ? "Ordnername…" : "Folder name…"}
-              style={{ flex: 1, minWidth: 0, border: "1px solid var(--accent)", borderRadius: 3, padding: "2px 6px", background: "var(--panel)", color: "var(--fg)", outline: "none", fontSize: 13, marginLeft: -4 }}
-            />
-          </div>
+        {/* Tag-Sammlungen — versteckt wenn collapsed */}
+        {!col && (
+          <>
+            <div className="row" style={{ padding: "16px 10px 6px", justifyContent: "space-between", alignItems: "center" }}>
+              <div className="eyebrow">{lang === "de" ? "Tag-Sammlungen" : "Tag Collections"}</div>
+            </div>
+            {(tagCollections || []).length === 0 ? (
+              <div style={{ padding: "2px 10px 6px", color: "var(--muted)", fontSize: 11 }}>
+                {lang === "de" ? "Noch keine gespeichert." : "None saved yet."}
+              </div>
+            ) : (tagCollections || []).map(tc => (
+              <TagCollectionRow
+                key={tc.id}
+                col={tc}
+                active={activeTagColId === tc.id}
+                onClick={onLoadTagCollection}
+                onRename={onRenameTagCollection}
+                onDelete={onDeleteTagCollection}
+                lang={lang}
+              />
+            ))}
+          </>
         )}
 
-        <div
-          onDragOver={(e) => e.preventDefault()}
-          onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setOverId(null); }}
-          onDrop={(e) => {
-            e.preventDefault();
-            const assetData = e.dataTransfer.getData("application/picpop-assets");
-            if (!assetData) { /* folder dropped on bg — just clear */ }
-            setDragId(null); setOverId(null);
-          }}
-        >
-          {folders.map(f => (
-            <FolderRow
-              key={f.id}
-              folder={f}
-              liveCount={(assets || window.ASSETS || []).filter(a => a.folderId === f.id).length}
-              active={(baseRoute === "folders" || baseRoute === "pdfs") && detailId === f.id}
-              dragOverHint={overId === f.id && dragId !== f.id}
-              onOpen={(id) => setRoute((area === "print" ? "pdfs:" : "folders:") + id)}
-              onRename={onRenameFolder}
-              onDelete={onDeleteFolder}
-              onPin={onPinFolder}
-              onMoveAssets={(ids, folderId) => { onMoveAssets?.(ids, folderId); setOverId(null); }}
-              onDragStart={(id) => setDragId(id)}
-              onDragOver={(id) => setOverId(id)}
-              onDrop={(id) => { if (dragId && dragId !== id) onReorderFolders(dragId, id); setDragId(null); setOverId(null); }}
-              lang={lang}
-            />
-          ))}
-          {folders.length === 0 && (
-            <div style={{ padding: "8px 10px", color: "var(--muted)", fontSize: 12 }}>
-              {lang === "de" ? "Keine Ordner. Lege einen neuen an." : "No folders yet. Create one."}
-            </div>
-          )}
+        {/* Geteilte Links — eigene Sektion */}
+        {!col && <div className="eyebrow" style={{ padding: "16px 10px 4px" }}>{lang === "de" ? "Teilen" : "Sharing"}</div>}
+        <div className={"nav-item" + (baseRoute === "shared" ? " active" : "")} onClick={() => setRoute("shared")} style={col ? { justifyContent: "center", padding: "7px 0" } : undefined} title={col ? t("nav_shared") : undefined}>
+          <window.Icon.link size={13} />
+          {!col && <span>{t("nav_shared")}</span>}
+          {!col && <span className="count">{window.SHARED_LINKS.length}</span>}
         </div>
 
         {/* Context */}
-        <div className="eyebrow" style={{ padding: "16px 10px 4px" }}>{lang === "de" ? "Bibliothek" : "Library"}</div>
-        <div className={"nav-item" + (baseRoute === "tags" ? " active" : "")} onClick={() => setRoute("tags")}>
+        {!col && <div className="eyebrow" style={{ padding: "16px 10px 4px" }}>{lang === "de" ? "Bibliothek" : "Library"}</div>}
+        <div className={"nav-item" + (baseRoute === "tags" ? " active" : "")} onClick={() => setRoute("tags")} style={col ? { justifyContent: "center", padding: "7px 0" } : undefined} title={col ? t("nav_tags") : undefined}>
           <window.Icon.tag size={13} />
-          <span>{t("nav_tags")}</span>
-          <span className="count">{window.TAGS.length}</span>
+          {!col && <span>{t("nav_tags")}</span>}
+          {!col && <span className="count">{window.TAGS.length}</span>}
         </div>
-        <div className={"nav-item" + (baseRoute === "shared" ? " active" : "")} onClick={() => setRoute("shared")}>
-          <window.Icon.link size={13} />
-          <span>{t("nav_shared")}</span>
-          <span className="count">{window.SHARED_LINKS.length}</span>
-        </div>
-        <div className={"nav-item" + (route === "external" ? " active" : "")} onClick={() => setRoute("external")}>
-          <window.Icon.globe size={13} />
-          <span>{lang === "de" ? "Externe Ansicht" : "External preview"}</span>
-        </div>
+        {!col && (
+          <div className={"nav-item" + (route === "external" ? " active" : "")} onClick={() => setRoute("external")}>
+            <window.Icon.globe size={13} />
+            <span>{lang === "de" ? "Externe Ansicht" : "External preview"}</span>
+          </div>
+        )}
 
         <div style={{ flex: 1 }} />
 
-        <div className="eyebrow" style={{ padding: "8px 10px 4px" }}>{lang === "de" ? "Konto" : "Account"}</div>
-        <div className={"nav-item" + (baseRoute === "settings" ? " active" : "")} onClick={() => setRoute("settings")}>
+        {/* Settings + Admin + Dev — icon-only in collapsed mode */}
+        {!col && <div className="eyebrow" style={{ padding: "8px 10px 4px" }}>{lang === "de" ? "Konto" : "Account"}</div>}
+        <div className={"nav-item" + (baseRoute === "settings" ? " active" : "")} onClick={() => setRoute("settings")} style={col ? { justifyContent: "center", padding: "7px 0" } : undefined} title={col ? t("nav_team") : undefined}>
           <window.Icon.settings size={13} />
-          <span>{t("nav_team")}</span>
+          {!col && <span>{t("nav_team")}</span>}
         </div>
-        {/* Admin — nur für Superadmin sichtbar */}
         {currentUser?.email === window.SUPERADMIN_EMAIL && (
-          <div className={"nav-item" + (baseRoute === "admin" ? " active" : "")} onClick={() => setRoute("admin")}>
+          <div className={"nav-item" + (baseRoute === "admin" ? " active" : "")} onClick={() => setRoute("admin")} style={col ? { justifyContent: "center", padding: "7px 0" } : undefined} title={col ? "Admin" : undefined}>
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
               <path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/>
             </svg>
-            <span>Admin</span>
+            {!col && <span>Admin</span>}
           </div>
         )}
-        <div className="nav-item" onClick={() => onDevOpen?.()} style={{ opacity: 0.45 }}>
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-            <polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/>
-          </svg>
-          <span>Dev</span>
-        </div>
-        {currentUser && (
-          <div className="row" style={{ gap: 10, padding: "10px 10px 12px", borderTop: "1px solid var(--line)", marginTop: 8 }}>
-            <div style={{
-              width: 28, height: 28, borderRadius: "50%", background: "var(--line-strong)",
-              display: "flex", alignItems: "center", justifyContent: "center",
-              fontWeight: 600, fontSize: 12, color: "var(--muted)", flexShrink: 0,
-            }}>
-              {(currentUser.email || "?")[0].toUpperCase()}
-            </div>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 12, fontWeight: 500 }} className="clamp-1">
-                {currentUser.displayName || currentUser.email?.split("@")[0] || "Nutzer"}
-              </div>
-              <div className="mono" style={{ color: "var(--muted)", fontSize: 9 }}>
-                {window.TENANT_ID}
-              </div>
-            </div>
-            <button
-              className="btn icon ghost sm"
-              title={lang === "de" ? "Abmelden" : "Sign out"}
-              onClick={onSignOut}
-              style={{ flexShrink: 0, color: "var(--muted)" }}
-            >
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
-                <polyline points="16 17 21 12 16 7"/>
-                <line x1="21" y1="12" x2="9" y2="12"/>
-              </svg>
-            </button>
+        {!col && (
+          <div className="nav-item" onClick={() => onDevOpen?.()} style={{ opacity: 0.45 }}>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/>
+            </svg>
+            <span>Dev</span>
           </div>
+        )}
+        {/* User row — compact icon + avatar when collapsed, full row when expanded */}
+        {currentUser && (
+          col ? (
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6, padding: "8px 0 10px", borderTop: "1px solid var(--line)", marginTop: 4 }}>
+              <div
+                style={{ width: 28, height: 28, borderRadius: "50%", background: "var(--line-strong)", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 600, fontSize: 12, color: "var(--muted)", cursor: "pointer" }}
+                title={currentUser.displayName || currentUser.email}
+                onClick={onSignOut}
+              >
+                {(currentUser.email || "?")[0].toUpperCase()}
+              </div>
+            </div>
+          ) : (
+            <div className="row" style={{ gap: 10, padding: "10px 10px 12px", borderTop: "1px solid var(--line)", marginTop: 8 }}>
+              <div style={{ width: 28, height: 28, borderRadius: "50%", background: "var(--line-strong)", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 600, fontSize: 12, color: "var(--muted)", flexShrink: 0 }}>
+                {(currentUser.email || "?")[0].toUpperCase()}
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 12, fontWeight: 500 }} className="clamp-1">
+                  {currentUser.displayName || currentUser.email?.split("@")[0] || "Nutzer"}
+                </div>
+                <div className="mono" style={{ color: "var(--muted)", fontSize: 9 }}>
+                  {window.TENANT_ID}
+                </div>
+              </div>
+              <button className="btn icon ghost sm" title={lang === "de" ? "Abmelden" : "Sign out"} onClick={onSignOut} style={{ flexShrink: 0, color: "var(--muted)" }}>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+                  <polyline points="16 17 21 12 16 7"/>
+                  <line x1="21" y1="12" x2="9" y2="12"/>
+                </svg>
+              </button>
+            </div>
+          )
         )}
       </nav>
     </aside>
@@ -327,38 +717,111 @@ function Sidebar({ area, setArea, folders, route, setRoute, lang, onUpload, onCr
 }
 
 // ── Topbar ───────────────────────────────────────────────────────────────────
-function Topbar({ lang, setLang, theme, setTheme, query, setQuery, route, area, currentFolderName }) {
+function Topbar({ lang, setLang, theme, setTheme, query, setQuery,
+  assets, area,
+  filterYear, setFilterYear, filterMonth, setFilterMonth,
+  filterTags, setFilterTags, filterAuthor, setFilterAuthor,
+  onClearFilters, onSaveFilters }) {
+
   const t = window.makeT(lang);
-  const baseRoute = route.split(":")[0];
-  const crumb = (() => {
-    const a = area === "print" ? "Print" : (lang === "de" ? "Bilder" : "Images");
-    if (baseRoute === "recent") return [t("nav_recent")];
-    if (baseRoute === "favorites") return [t("nav_favorites")];
-    if (baseRoute === "uploads") return [t("nav_uploads")];
-    if (baseRoute === "all") return [a, area === "print" ? t("nav_all_pdfs") : t("nav_all_images")];
-    if (baseRoute === "tags") return [t("nav_tags")];
-    if (baseRoute === "shared") return [t("nav_shared")];
-    if (baseRoute === "settings") return [lang === "de" ? "Einstellungen" : "Settings"];
-    if (baseRoute === "external") return [lang === "de" ? "Externe Ansicht" : "External preview"];
-    if (baseRoute === "dev") return ["Dev"];
-    if (currentFolderName) return [a, currentFolderName];
-    return [a, lang === "de" ? "Alle Ordner" : "All folders"];
-  })();
-  return (
-    <header className="topbar">
-      <div className="row" style={{ gap: 6, color: "var(--muted)", fontSize: 12 }}>
-        {crumb.map((c, i) => (
-          <span key={i} className="row" style={{ gap: 6 }}>
-            {i > 0 && <window.Icon.chevR size={10} />}
-            <span style={{ color: i === crumb.length - 1 ? "var(--fg)" : "var(--muted)" }}>{c}</span>
-          </span>
-        ))}
+  const [filterOpen, setFilterOpen] = useStateA(false);
+  const [saveCollName, setSaveCollName] = useStateA("");
+  const { useState: useStateT, useMemo: useMemoT, useEffect: useEffectT, useRef: useRefT } = React;
+  const panelRef = useRefT(null);
+
+  const activeCount = (filterYear !== null ? 1 : 0) + (filterMonth !== null ? 1 : 0) + filterTags.length + (filterAuthor !== null ? 1 : 0);
+
+  // Close on outside click
+  useEffectT(() => {
+    if (!filterOpen) return;
+    function onDown(e) { if (panelRef.current && !panelRef.current.contains(e.target)) setFilterOpen(false); }
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [filterOpen]);
+
+  // Derived options from assets
+  const allAssets = assets || [];
+  const availableYears = useMemoT(() => {
+    const s = new Set();
+    allAssets.forEach(a => { const d = new Date(a.takenAt || a.date); if (!isNaN(d)) s.add(d.getFullYear()); });
+    return [...s].sort((a, b) => b - a);
+  }, [allAssets]);
+
+  const availableMonths = useMemoT(() => {
+    const s = new Set();
+    allAssets.forEach(a => {
+      const d = new Date(a.takenAt || a.date);
+      if (!isNaN(d) && (!filterYear || d.getFullYear() === filterYear)) s.add(d.getMonth());
+    });
+    return [...s].sort((a, b) => a - b);
+  }, [allAssets, filterYear]);
+
+  const allTags = window.TAGS || [];
+  const mediumTags   = allTags.filter(tg => tg.category === "medium");
+  const kampagneTags = allTags.filter(tg => tg.category === "kampagne");
+  const motivTags    = allTags.filter(tg => tg.category === "motiv");
+
+  const availableAuthors = useMemoT(() => {
+    const s = new Set(); allAssets.forEach(a => { if (a.author) s.add(a.author); }); return [...s].sort();
+  }, [allAssets]);
+
+  const MONTHS_DE = ["Jan","Feb","Mär","Apr","Mai","Jun","Jul","Aug","Sep","Okt","Nov","Dez"];
+  const MONTHS_EN = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+
+  function toggleTag(id) {
+    setFilterTags(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+  }
+
+  function FilterRow({ label, children }) {
+    return (
+      <div style={{ display: "flex", alignItems: "baseline", gap: 12, padding: "6px 0", borderBottom: "1px solid var(--line)" }}>
+        <span style={{ fontFamily: "var(--font-mono)", fontSize: 9, letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--muted)", minWidth: 72, flexShrink: 0 }}>{label}</span>
+        <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>{children}</div>
       </div>
-      <div className="input ghost" style={{ flex: 1, maxWidth: 520, marginLeft: 16 }}>
+    );
+  }
+
+  function Chip({ active, onClick, children }) {
+    return (
+      <span onClick={onClick} style={{ display: "inline-flex", alignItems: "center", gap: 4, height: 22, padding: "0 8px", borderRadius: 4, fontSize: 11, cursor: "pointer", border: `1px solid ${active ? "transparent" : "var(--line)"}`, background: active ? "var(--fg)" : "var(--panel)", color: active ? "var(--bg)" : "var(--fg-2)", transition: "background .12s, color .12s, border-color .12s" }}>
+        {children}
+      </span>
+    );
+  }
+
+  function TagChip({ tg }) {
+    const active = filterTags.includes(tg.id);
+    return (
+      <span onClick={() => toggleTag(tg.id)} style={{ display: "inline-flex", alignItems: "center", gap: 4, height: 22, padding: "0 8px", borderRadius: 4, fontSize: 11, cursor: "pointer", border: "1px solid transparent", background: active ? window.tagColor(tg) : window.tagBg(tg), color: active ? "var(--bg)" : window.tagColor(tg), transition: "background .12s" }}>
+        {window.tagLabel(tg, lang)}
+      </span>
+    );
+  }
+
+  return (
+    <header className="topbar" style={{ position: "relative", overflow: "visible" }}>
+      {/* Search */}
+      <div className="input ghost" style={{ flex: 1, maxWidth: 600 }}>
         <window.Icon.search size={14} />
         <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t("search_placeholder")} />
-        <span className="kbd">⌘K</span>
+        {query
+          ? <button onClick={() => setQuery("")} style={{ all: "unset", cursor: "pointer", color: "var(--muted)", lineHeight: 1, fontSize: 16, display: "flex" }} title={lang === "de" ? "Suche leeren" : "Clear search"}>×</button>
+          : <span className="kbd">⌘K</span>}
       </div>
+
+      {/* Filter toggle */}
+      <button
+        onClick={() => setFilterOpen(v => !v)}
+        style={{ all: "unset", cursor: "pointer", height: 32, padding: "0 10px", display: "flex", alignItems: "center", gap: 6, borderRadius: 4, border: `1px solid ${filterOpen || activeCount > 0 ? "var(--fg)" : "var(--line-strong)"}`, background: activeCount > 0 ? "var(--fg)" : "var(--panel)", color: activeCount > 0 ? "var(--bg)" : "var(--fg-2)", fontSize: 12, fontWeight: 500, transition: "all .15s" }}
+        title={lang === "de" ? "Filter" : "Filters"}
+      >
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/>
+        </svg>
+        {lang === "de" ? "Filter" : "Filters"}
+        {activeCount > 0 && <span style={{ background: "var(--bg)", color: "var(--fg)", borderRadius: 10, padding: "0 5px", fontSize: 10, fontFamily: "var(--font-mono)" }}>{activeCount}</span>}
+      </button>
+
       <div style={{ flex: 1 }} />
       <div className="row" style={{ gap: 6 }}>
         <button className="btn sm" onClick={() => setLang(lang === "de" ? "en" : "de")} title="Language">
@@ -369,8 +832,122 @@ function Topbar({ lang, setLang, theme, setTheme, query, setQuery, route, area, 
         </button>
         <button className="btn icon sm" title="Notifications"><window.Icon.inbox size={14} /></button>
       </div>
+
+      {/* Filter dropdown panel */}
+      {filterOpen && (
+        <div ref={panelRef} style={{ position: "absolute", top: "calc(100% + 1px)", left: 0, right: 0, zIndex: 50, background: "var(--panel)", borderBottom: "1px solid var(--line)", boxShadow: "0 8px 24px -8px rgba(0,0,0,0.18)", padding: "4px 24px 12px" }}>
+          {availableYears.length > 0 && (
+            <FilterRow label={lang === "de" ? "Jahr" : "Year"}>
+              <Chip active={filterYear === null} onClick={() => { setFilterYear(null); setFilterMonth(null); }}>{lang === "de" ? "Alle" : "All"}</Chip>
+              {availableYears.map(y => (
+                <Chip key={y} active={filterYear === y} onClick={() => { setFilterYear(filterYear === y ? null : y); setFilterMonth(null); }}>
+                  {y}
+                </Chip>
+              ))}
+            </FilterRow>
+          )}
+          {availableMonths.length > 0 && (
+            <FilterRow label={lang === "de" ? "Monat" : "Month"}>
+              <Chip active={filterMonth === null} onClick={() => setFilterMonth(null)}>{lang === "de" ? "Alle" : "All"}</Chip>
+              {availableMonths.map(m => (
+                <Chip key={m} active={filterMonth === m} onClick={() => setFilterMonth(filterMonth === m ? null : m)}>
+                  {lang === "de" ? MONTHS_DE[m] : MONTHS_EN[m]}
+                </Chip>
+              ))}
+            </FilterRow>
+          )}
+          {area !== "images" && mediumTags.length > 0 && (
+            <FilterRow label="Medium">
+              {mediumTags.map(tg => <TagChip key={tg.id} tg={tg} />)}
+            </FilterRow>
+          )}
+          {area !== "images" && kampagneTags.length > 0 && (
+            <FilterRow label={lang === "de" ? "Kampagne" : "Campaign"}>
+              {kampagneTags.map(tg => <TagChip key={tg.id} tg={tg} />)}
+            </FilterRow>
+          )}
+          {motivTags.length > 0 && (
+            <FilterRow label={lang === "de" ? "Bilder" : "Images"}>
+              {motivTags.map(tg => <TagChip key={tg.id} tg={tg} />)}
+            </FilterRow>
+          )}
+          {availableAuthors.length > 0 && (
+            <FilterRow label={lang === "de" ? "Urheber" : "Author"}>
+              <Chip active={filterAuthor === null} onClick={() => setFilterAuthor(null)}>{lang === "de" ? "Alle" : "All"}</Chip>
+              {availableAuthors.map(au => {
+                const member = (window.TEAM || []).find(u => u.name === au);
+                return (
+                  <Chip key={au} active={filterAuthor === au} onClick={() => setFilterAuthor(filterAuthor === au ? null : au)}>
+                    {member && <window.Avatar user={member} size={13} />}
+                    {au.split(" ")[0]}
+                  </Chip>
+                );
+              })}
+            </FilterRow>
+          )}
+          {activeCount > 0 && (
+            <div style={{ paddingTop: 10, display: "flex", flexDirection: "column", gap: 8, borderTop: "1px solid var(--line)", marginTop: 6 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: "var(--muted)", flexShrink: 0 }}>
+                  <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/>
+                  <line x1="7" y1="7" x2="7.01" y2="7"/>
+                </svg>
+                <input
+                  value={saveCollName}
+                  onChange={e => setSaveCollName(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === "Enter" && saveCollName.trim()) {
+                      onSaveFilters?.(saveCollName.trim());
+                      setSaveCollName("");
+                      setFilterOpen(false);
+                    }
+                    if (e.key === "Escape") setSaveCollName("");
+                  }}
+                  placeholder={lang === "de" ? "Als Tag-Sammlung speichern…" : "Save as tag collection…"}
+                  style={{ flex: 1, border: "1px solid var(--line-strong)", borderRadius: 4, padding: "5px 8px", background: "var(--panel)", color: "var(--fg)", fontSize: 11, outline: "none" }}
+                />
+                <button
+                  className="btn sm"
+                  style={{ flexShrink: 0, opacity: saveCollName.trim() ? 1 : 0.4, pointerEvents: saveCollName.trim() ? "auto" : "none" }}
+                  onClick={() => {
+                    if (saveCollName.trim()) {
+                      onSaveFilters?.(saveCollName.trim());
+                      setSaveCollName("");
+                      setFilterOpen(false);
+                    }
+                  }}
+                >
+                  {lang === "de" ? "Speichern" : "Save"}
+                </button>
+              </div>
+              <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                <button className="btn ghost sm" onClick={() => { onClearFilters(); setFilterOpen(false); }} style={{ color: "var(--muted)", fontSize: 11 }}>
+                  {lang === "de" ? "Filter zurücksetzen" : "Clear filters"}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </header>
   );
+}
+
+// Removes t-unassigned-{cat} for any category that now has a real tag
+function cleanUnassignedTags(tagIds) {
+  const CATS = ["motiv", "kampagne", "medium"];
+  let result = [...tagIds];
+  CATS.forEach(cat => {
+    const uid = `t-unassigned-${cat}`;
+    if (!result.includes(uid)) return;
+    const hasReal = result.some(tid => {
+      if (tid === uid) return false;
+      const tg = (window.TAGS || []).find(t => t.id === tid);
+      return tg && tg.category === cat;
+    });
+    if (hasReal) result = result.filter(t => t !== uid);
+  });
+  return result;
 }
 
 // ── App ──────────────────────────────────────────────────────────────────────
@@ -410,20 +987,69 @@ function App() {
 
   const [area, setArea] = useStateA("images"); // "images" | "print"
   const [route, setRoute] = useStateA("recent");
+
+  // ── Sidebar resize / collapse ─────────────────────────────────────────────
+  const [sidebarWidth, setSidebarWidthRaw] = useStateA(() => {
+    try { return parseInt(localStorage.getItem("picpop-sidebar-w") || "240", 10); } catch { return 240; }
+  });
+  const [sidebarCollapsed, setSidebarCollapsedRaw] = useStateA(() => {
+    try { return localStorage.getItem("picpop-sidebar-collapsed") === "1"; } catch { return false; }
+  });
+  function setSidebarWidth(w) {
+    const clamped = Math.max(160, Math.min(480, w));
+    setSidebarWidthRaw(clamped);
+    try { localStorage.setItem("picpop-sidebar-w", String(clamped)); } catch {}
+  }
+  function setSidebarCollapsed(c) {
+    setSidebarCollapsedRaw(c);
+    try { localStorage.setItem("picpop-sidebar-collapsed", c ? "1" : "0"); } catch {}
+  }
   const [query, setQuery] = useStateA("");
+  const [filterYear, setFilterYear] = useStateA(null);
+  const [filterMonth, setFilterMonth] = useStateA(null);
+  const [filterTags, setFilterTags] = useStateA([]);
+  const [filterAuthor, setFilterAuthor] = useStateA(null);
+  const hasFilter = filterYear !== null || filterMonth !== null || filterTags.length > 0 || filterAuthor !== null;
+  function clearFilters() { setFilterYear(null); setFilterMonth(null); setFilterTags([]); setFilterAuthor(null); setActiveTagColId(null); }
 
   const [openAsset, setOpenAsset] = useStateA(null);
+  const [openPeers, setOpenPeers] = useStateA(null);
+  // Opens an asset and captures the visible peer list for prev/next navigation
+  function openAssetWith(a, peers) { setOpenAsset(a); setOpenPeers(peers || null); }
+
+  // Pinch-to-zoom on trackpad: wheel + ctrlKey = pinch gesture on macOS.
+  // Must listen on document with passive:false — child listeners get it too late for preventDefault.
+  const contentRef = useRefA(null);
+  useEffectA(() => {
+    function onWheel(e) {
+      if (!e.ctrlKey) return;                        // regular scroll — ignore
+      const el = contentRef.current;
+      if (!el || !el.contains(e.target)) return;    // pointer not over grid area
+      if (openAsset) return;                         // detail modal open — don't interfere
+      e.preventDefault();                            // stop browser page-zoom
+      const current = parseInt(localStorage.getItem("picpop.thumbSize") || "220", 10);
+      window.setGlobalThumbSize(current - e.deltaY * 1.5);
+    }
+    document.addEventListener("wheel", onWheel, { passive: false });
+    return () => document.removeEventListener("wheel", onWheel);
+  }, [openAsset]);
   const [devOpen, setDevOpen] = useStateA(false);
   const [shareTarget, setShareTarget] = useStateA(null);
   const [uploadOpen, setUploadOpen] = useStateA(false);
   const [toast, setToast] = useStateA(null);
+  const [companyName, setCompanyName] = useStateA("");
 
-  // Favorites — set of asset ids
-  const [favorites, setFavorites] = useStateA(() => new Set((window.ASSETS || []).slice(0, 4).map(a => a.id)));
+  // Favorites — persisted in localStorage per tenant
+  const favKey = () => `picpop.fav.${window.TENANT_ID || "default"}`;
+  const [favorites, setFavorites] = useStateA(() => {
+    try { return new Set(JSON.parse(localStorage.getItem(favKey()) || "[]")); }
+    catch(_) { return new Set(); }
+  });
   function toggleFavorite(id) {
     setFavorites(prev => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id); else next.add(id);
+      try { localStorage.setItem(favKey(), JSON.stringify([...next])); } catch(_) {}
       return next;
     });
   }
@@ -431,6 +1057,7 @@ function App() {
     setFavorites(prev => {
       const next = new Set(prev);
       ids.forEach(id => { if (fav) next.add(id); else next.delete(id); });
+      try { localStorage.setItem(favKey(), JSON.stringify([...next])); } catch(_) {}
       return next;
     });
   }
@@ -443,9 +1070,12 @@ function App() {
   const [tags, setTags] = useStateA(window.TAGS);
   const [team, setTeam] = useStateA(window.TEAM);
   const [sharedLinks, setSharedLinks] = useStateA([]);
+  const [tagCollections, setTagCollections] = useStateA([]);
+  const [activeTagColId, setActiveTagColId] = useStateA(null);
   const [dbReady, setDbReady] = useStateA(false);
 
   // Keep window globals in sync so views that read them directly stay current
+  useEffectA(() => { window.currentArea = area; }, [area]);
   useEffectA(() => { window.FOLDERS = imageFolders; }, [imageFolders]);
   useEffectA(() => { window.PDF_FOLDERS = pdfFolders; }, [pdfFolders]);
   useEffectA(() => { window.ASSETS = assets; }, [assets]);
@@ -463,10 +1093,13 @@ function App() {
       return;
     }
 
-    // Load AI config so uploadAsset can use the OpenAI key immediately
+    // Load AI config + company name from tenant settings
     window.loadAiConfig?.();
+    window.tenantSettingsDoc?.().get()
+      .then(snap => { if (snap.exists) setCompanyName(snap.data().companyName || ""); })
+      .catch(() => {});
 
-    let unsubFolders, unsubPdfs, unsubAssets, unsubTags, unsubTeam;
+    let unsubFolders, unsubPdfs, unsubAssets, unsubTags, unsubTeam, unsubTagCols;
     window.seedIfEmpty()
       .then(() => {
         unsubFolders = window.subscribeToFolders(data => setImageFolders(data));
@@ -477,7 +1110,10 @@ function App() {
           setDbReady(true);
         });
         unsubTags = window.subscribeToTags(data => {
-          if (data.length > 0) { window.TAGS = data; setTags(data); }
+          // Strip any persisted t-unassigned-* docs and inject virtual objects instead
+          const real = data.filter(t => !t.id.startsWith("t-unassigned-"));
+          const merged = [...real, ...(window.VIRTUAL_UNASSIGNED_TAGS || [])];
+          if (merged.length > 0) { window.TAGS = merged; setTags(merged); }
         });
         unsubTeam = window.subscribeToTeam(data => {
           if (data.length > 0) { window.TEAM = data; setTeam(data); }
@@ -485,12 +1121,13 @@ function App() {
         window.subscribeToSharedLinks(data => {
           window.SHARED_LINKS = data; setSharedLinks(data);
         });
+        unsubTagCols = window.subscribeToTagCollections?.(data => setTagCollections(data));
       })
       .catch(err => {
         console.error("Firestore init error:", err);
         setDbReady(true);
       });
-    return () => { unsubFolders?.(); unsubPdfs?.(); unsubAssets?.(); unsubTags?.(); unsubTeam?.(); };
+    return () => { unsubFolders?.(); unsubPdfs?.(); unsubAssets?.(); unsubTags?.(); unsubTeam?.(); unsubTagCols?.(); };
   }, [user]);
 
   const folders = area === "images" ? imageFolders : pdfFolders;
@@ -498,16 +1135,21 @@ function App() {
 
   // Switch route when area switches
   useEffectA(() => {
-    if (route.startsWith("folders") || route.startsWith("pdfs")) {
+    if (route.startsWith("folders") || route.startsWith("pdfs") || route.startsWith("literatur")) {
       const base = area === "print" ? "pdfs" : "folders";
       setRoute(base);
     }
   }, [area]);
 
-  // Peer assets for prev/next navigation in detail modal (same area, date-sorted)
+  // Peer assets for prev/next navigation — only within the same folder
   const peerAssets = useMemoA(
-    () => [...assets].filter(a => area === "print" ? a.kind === "pdf" : a.kind !== "pdf").sort((a, b) => a.date < b.date ? 1 : -1),
-    [assets, area]
+    () => {
+      if (!openAsset) return [];
+      return [...assets]
+        .filter(a => a.folderId === openAsset.folderId && (area === "print" ? (a.kind === "pdf" || a.area === "print") : (a.kind !== "pdf" && a.area !== "print")))
+        .sort((a, b) => a.date < b.date ? 1 : -1);
+    },
+    [assets, openAsset?.folderId, area]
   );
 
   function changeAsset(next) {
@@ -540,7 +1182,10 @@ function App() {
   }
 
   function bulkAddTag(ids, tagId) {
-    bulkPatch(ids, a => ({ ...a, tags: a.tags.includes(tagId) ? a.tags : [...a.tags, tagId] }));
+    bulkPatch(ids, a => {
+      const next = a.tags.includes(tagId) ? a.tags : [...a.tags, tagId];
+      return { ...a, tags: cleanUnassignedTags(next) };
+    });
     const tg = window.TAGS.find(t => t.id === tagId);
     setToast(lang === "de" ? `Tag hinzugefügt${tg ? ": " + tg.name : ""}` : `Tag added${tg ? ": " + tg.name_en : ""}`);
   }
@@ -560,6 +1205,12 @@ function App() {
     });
     window.dbSaveTag(tag).catch(console.error);
   }
+  window.saveTag = saveTag;
+
+  function updateAssetTags(id, newTags) {
+    bulkPatch([id], a => ({ ...a, tags: cleanUnassignedTags(newTags) }));
+  }
+  window.updateAssetTags = updateAssetTags;
 
   function deleteTag(id) {
     setTags(prev => { const next = prev.filter(t => t.id !== id); window.TAGS = next; return next; });
@@ -574,6 +1225,49 @@ function App() {
     });
     window.dbDeleteTag(id).catch(console.error);
     setToast(lang === "de" ? "Tag gelöscht" : "Tag deleted");
+  }
+
+  // ── Tag-Collection CRUD ───────────────────────────────────────────────────
+  function saveTagCollection(name) {
+    const id = "tc-" + Date.now() + "-" + Math.random().toString(36).slice(2, 6);
+    const col = {
+      id, name, area,
+      filterTags: [...filterTags],
+      filterYear: filterYear ?? null,
+      filterMonth: filterMonth ?? null,
+      filterAuthor: filterAuthor ?? null,
+      createdAt: new Date().toISOString(),
+    };
+    setTagCollections(prev => [col, ...prev]);
+    setActiveTagColId(id);
+    window.dbSaveTagCollection?.(col).catch(console.error);
+    setToast(lang === "de" ? `Tag-Sammlung gespeichert: „${name}"` : `Tag collection saved: "${name}"`);
+  }
+
+  function loadTagCollection(col) {
+    if (col.area) setArea(col.area);
+    setFilterTags(col.filterTags || []);
+    setFilterYear(col.filterYear ?? null);
+    setFilterMonth(col.filterMonth ?? null);
+    setFilterAuthor(col.filterAuthor ?? null);
+    setQuery("");
+    setActiveTagColId(col.id);
+  }
+
+  function renameTagCollection(id, name) {
+    setTagCollections(prev => {
+      const next = prev.map(c => c.id === id ? { ...c, name } : c);
+      const col = next.find(c => c.id === id);
+      if (col) window.dbSaveTagCollection?.(col).catch(console.error);
+      return next;
+    });
+  }
+
+  function deleteTagCollection(id) {
+    setTagCollections(prev => prev.filter(c => c.id !== id));
+    if (activeTagColId === id) setActiveTagColId(null);
+    window.dbDeleteTagCollection?.(id).catch(console.error);
+    setToast(lang === "de" ? "Tag-Sammlung gelöscht" : "Tag collection deleted");
   }
 
   // ── Team CRUD ─────────────────────────────────────────────────────────────
@@ -614,12 +1308,40 @@ function App() {
     setToast(lang === "de" ? `Verschoben nach: ${f?.name || folderId}` : `Moved to: ${f?.name || folderId}`);
   }
 
-  function openFolder(id) {
-    const isPdf = pdfFolders.find(f => f.id === id);
-    setRoute((isPdf ? "pdfs:" : "folders:") + id);
+  function moveFolderParent(id, parentId) {
+    const isPdf = !!pdfFolders.find(f => f.id === id);
+    const setter = isPdf ? setPdfFolders : setImageFolders;
+    const save   = isPdf ? window.dbSavePdfFolder : window.dbSaveFolder;
+    setter(prev => {
+      const next = prev.map(f => f.id === id ? { ...f, parent: parentId || null } : f);
+      if (isPdf) window.PDF_FOLDERS = next; else window.FOLDERS = next;
+      return next;
+    });
+    const f = [...imageFolders, ...pdfFolders].find(x => x.id === id);
+    if (f) save({ ...f, parent: parentId || null }).catch(console.error);
+    setToast(lang === "de" ? "Ordner verschoben" : "Folder moved");
   }
 
-  function createFolder(name) {
+  function moveAssetsToArea(ids, targetArea) {
+    const unsorted = targetArea === "print" ? "p-unsorted" : "f-unsorted";
+    bulkPatch(ids, a => ({ ...a, area: targetArea, folderId: unsorted, date: new Date().toISOString() }));
+    const label = lang === "de"
+      ? `Nach ${targetArea === "print" ? "Print" : "Bilder"} verschoben`
+      : `Moved to ${targetArea === "print" ? "Print" : "Images"}`;
+    setToast(label);
+  }
+
+  function openFolder(id) {
+    const pdfFolder = pdfFolders.find(f => f.id === id);
+    if (pdfFolder) {
+      const base = pdfFolder.category === "literatur" ? "literatur" : "pdfs";
+      setRoute(base + ":" + id);
+    } else {
+      setRoute("folders:" + id);
+    }
+  }
+
+  function createFolder(name, category = "kampagne") {
     const id = (area === "print" ? "p-" : "f-") + Math.random().toString(36).slice(2, 8);
     const hues = [25, 90, 200, 290, 50, 140, 170, 220];
     const newF = {
@@ -631,12 +1353,15 @@ function App() {
       coverHues: [hues[Math.floor(Math.random()*hues.length)], hues[Math.floor(Math.random()*hues.length)], hues[Math.floor(Math.random()*hues.length)], hues[Math.floor(Math.random()*hues.length)]],
       owner: "u-tt",
       sortOrder: 0,
+      ...(area === "print" ? { category } : {}),
     };
     setFolders(prev => [newF, ...prev]);
     setToast(lang === "de" ? `Ordner „${name}" angelegt` : `Folder "${name}" created`);
     const save = area === "print" ? window.dbSavePdfFolder : window.dbSaveFolder;
     save(newF).catch(console.error);
+    return id;
   }
+  window.createFolder = createFolder;
 
   function renameFolder(id, name) {
     setFolders(prev => prev.map(f => {
@@ -662,15 +1387,13 @@ function App() {
     const prevAssets  = assets;
     setFolders(prev => prev.filter(x => x.id !== id));
     setAssets(prev => prev.map(a => a.folderId === id ? { ...a, folderId: targetFolder } : a));
-    if (route.endsWith(":" + id)) setRoute(area === "print" ? "pdfs" : "folders");
+    if (route.endsWith(":" + id)) {
+      const rb = route.split(":")[0];
+      setRoute(rb === "literatur" ? "literatur" : (area === "print" ? "pdfs" : "folders"));
+    }
     setToast(lang === "de" ? `Sammlung gelöscht · Inhalte in „Nicht zugeordnet"` : `Collection deleted · Contents moved to "Unsorted"`);
     const del = area === "print" ? window.dbDeletePdfFolder : window.dbDeleteFolder;
-    del(id).catch(err => {
-      console.error("deleteFolder failed:", err);
-      setFolders(prevFolders);
-      setAssets(prevAssets);
-      setToast(lang === "de" ? "Löschen fehlgeschlagen" : "Delete failed");
-    });
+    del(id).catch(err => console.warn("deleteFolder (Firestore):", err?.message));
   }
 
   function reorderFolders(dragId, dropId) {
@@ -716,7 +1439,7 @@ function App() {
       {route === "external" ? (
         <window.ExternalShareView onExit={() => setRoute("favorites")} lang={lang} />
       ) : (
-        <div className="app" style={window.isImpersonating?.() ? { paddingTop: 36 } : undefined}>
+        <div className="app" style={{ gridTemplateColumns: `${sidebarCollapsed ? 48 : sidebarWidth}px 1fr`, ...(window.isImpersonating?.() ? { paddingTop: 36 } : {}) }}>
           <Sidebar
             area={area} setArea={setArea}
             folders={folders}
@@ -728,59 +1451,80 @@ function App() {
             onDeleteFolder={deleteFolder}
             onReorderFolders={reorderFolders}
             onMoveAssets={bulkMoveAssets}
+            onMoveAssetsToArea={moveAssetsToArea}
+            onMoveFolder={moveFolderParent}
             onPinFolder={pinFolder}
             onDevOpen={() => setDevOpen(true)}
             assets={assets}
             currentUser={user}
+            companyName={companyName}
             onSignOut={signOut}
+            tagCollections={tagCollections}
+            onLoadTagCollection={loadTagCollection}
+            onDeleteTagCollection={deleteTagCollection}
+            onRenameTagCollection={renameTagCollection}
+            activeTagColId={activeTagColId}
+            collapsed={sidebarCollapsed}
+            onCollapse={setSidebarCollapsed}
+            onResize={setSidebarWidth}
           />
           <div className="main">
-            <Topbar lang={lang} setLang={setLang} theme={theme} setTheme={setTheme} query={query} setQuery={setQuery} route={route} area={area} currentFolderName={currentFolder?.name} />
-            <div className="content scroll">
+            <Topbar lang={lang} setLang={setLang} theme={theme} setTheme={setTheme} query={query} setQuery={setQuery} assets={assets} area={area} filterYear={filterYear} setFilterYear={setFilterYear} filterMonth={filterMonth} setFilterMonth={setFilterMonth} filterTags={filterTags} setFilterTags={setFilterTags} filterAuthor={filterAuthor} setFilterAuthor={setFilterAuthor} onClearFilters={clearFilters} onSaveFilters={saveTagCollection} />
+            <div className="content scroll" ref={contentRef}>
               {!dbReady && (
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "60vh" }}>
                   <div style={{ width: 28, height: 28, border: "2.5px solid var(--line-strong)", borderTopColor: "var(--accent)", borderRadius: "50%", animation: "spin 0.7s linear infinite" }} />
                 </div>
               )}
-              {dbReady && baseRoute === "recent" && (
-                <window.RecentView area={area} assets={assets} folders={imageFolders} pdfFolders={pdfFolders} sharedLinks={sharedLinks} currentUser={user} onOpenFolder={openFolder} onOpenAsset={(a) => setOpenAsset(a)} onShareTarget={setShareTarget} onDeleteAssets={deleteAssets} onBulkAddTag={bulkAddTag} onBulkSetAuthor={bulkSetAuthor} onBulkMoveAssets={bulkMoveAssets} lang={lang} />
+              {/* Global search / filter — overrides current route */}
+              {dbReady && (query || hasFilter) && (
+                <window.RecentUploadsView assets={assets} area={area} lang={lang} query={query} filterYear={filterYear} filterMonth={filterMonth} filterTags={filterTags} filterAuthor={filterAuthor} onOpenAsset={openAssetWith} onOpenFolder={openFolder} onShareTarget={setShareTarget} onDeleteAssets={deleteAssets} onBulkAddTag={bulkAddTag} onBulkSetAuthor={bulkSetAuthor} onBulkMoveAssets={bulkMoveAssets} imageFolders={imageFolders} pdfFolders={pdfFolders} />
               )}
-              {dbReady && baseRoute === "favorites" && (
-                <window.FavoritesView assets={assets} area={area} lang={lang} onOpenAsset={(a) => setOpenAsset(a)} onOpenFolder={openFolder} onShareTarget={setShareTarget} query={query} onDeleteAssets={deleteAssets} onBulkAddTag={bulkAddTag} onBulkSetAuthor={bulkSetAuthor} onBulkMoveAssets={bulkMoveAssets} imageFolders={imageFolders} pdfFolders={pdfFolders} />
+              {dbReady && !query && !hasFilter && baseRoute === "recent" && (
+                <window.RecentView area={area} assets={assets} folders={imageFolders} pdfFolders={pdfFolders} sharedLinks={sharedLinks} currentUser={user} onOpenFolder={openFolder} onOpenAsset={openAssetWith} onShareTarget={setShareTarget} onDeleteAssets={deleteAssets} onBulkAddTag={bulkAddTag} onBulkSetAuthor={bulkSetAuthor} onBulkMoveAssets={bulkMoveAssets} lang={lang} />
               )}
-              {dbReady && baseRoute === "uploads" && (
-                <window.RecentUploadsView assets={assets} area={area} lang={lang} onOpenAsset={(a) => setOpenAsset(a)} onOpenFolder={openFolder} onShareTarget={setShareTarget} onDeleteAssets={deleteAssets} onBulkAddTag={bulkAddTag} onBulkSetAuthor={bulkSetAuthor} onBulkMoveAssets={bulkMoveAssets} imageFolders={imageFolders} pdfFolders={pdfFolders} />
+              {dbReady && !query && !hasFilter && baseRoute === "favorites" && (
+                <window.FavoritesView assets={assets} area={area} lang={lang} onOpenAsset={openAssetWith} onOpenFolder={openFolder} onShareTarget={setShareTarget} query={query} onDeleteAssets={deleteAssets} onBulkAddTag={bulkAddTag} onBulkSetAuthor={bulkSetAuthor} onBulkMoveAssets={bulkMoveAssets} imageFolders={imageFolders} pdfFolders={pdfFolders} />
               )}
-              {dbReady && baseRoute === "all" && (
-                <window.AllAssetsView assets={assets} area={area} lang={lang} onOpenAsset={(a) => setOpenAsset(a)} onShareTarget={setShareTarget} query={query} onDeleteAssets={deleteAssets} onBulkAddTag={bulkAddTag} onBulkSetAuthor={bulkSetAuthor} onBulkMoveAssets={bulkMoveAssets} imageFolders={imageFolders} pdfFolders={pdfFolders} />
+              {dbReady && !query && !hasFilter && baseRoute === "uploads" && (
+                <window.RecentUploadsView assets={assets} area={area} lang={lang} query={query} onOpenAsset={openAssetWith} onOpenFolder={openFolder} onShareTarget={setShareTarget} onDeleteAssets={deleteAssets} onBulkAddTag={bulkAddTag} onBulkSetAuthor={bulkSetAuthor} onBulkMoveAssets={bulkMoveAssets} imageFolders={imageFolders} pdfFolders={pdfFolders} />
               )}
-              {dbReady && baseRoute === "folders" && !detailId && (
+              {dbReady && !query && !hasFilter && baseRoute === "all" && (
+                <window.AllAssetsView assets={assets} area={area} lang={lang} onOpenAsset={openAssetWith} onShareTarget={setShareTarget} query={query} onDeleteAssets={deleteAssets} onBulkAddTag={bulkAddTag} onBulkSetAuthor={bulkSetAuthor} onBulkMoveAssets={bulkMoveAssets} imageFolders={imageFolders} pdfFolders={pdfFolders} />
+              )}
+              {dbReady && !query && !hasFilter && baseRoute === "folders" && !detailId && (
                 <window.FoldersView folders={imageFolders} kind="image" lang={lang} onOpenFolder={openFolder} onCreateNew={() => setUploadOpen(true)} onMoveAssets={bulkMoveAssets} />
               )}
-              {dbReady && baseRoute === "folders" && currentFolder && (
-                <window.FolderDetailView assets={assets} folder={currentFolder} kind="image" lang={lang} onBack={() => setRoute("folders")} onOpenAsset={(a) => setOpenAsset(a)} onShareTarget={setShareTarget} onUpload={() => setUploadOpen(true)} onDeleteAssets={deleteAssets} onBulkAddTag={bulkAddTag} onBulkSetAuthor={bulkSetAuthor} onBulkMoveAssets={bulkMoveAssets} imageFolders={imageFolders} pdfFolders={pdfFolders} />
+              {dbReady && !query && !hasFilter && baseRoute === "folders" && currentFolder && (
+                <window.FolderDetailView assets={assets} folder={currentFolder} kind="image" lang={lang} onBack={() => setRoute("folders")} onOpenFolder={openFolder} onOpenAsset={openAssetWith} onShareTarget={setShareTarget} onUpload={() => setUploadOpen(true)} onDeleteAssets={deleteAssets} onBulkAddTag={bulkAddTag} onBulkSetAuthor={bulkSetAuthor} onBulkMoveAssets={bulkMoveAssets} imageFolders={imageFolders} pdfFolders={pdfFolders} />
               )}
-              {dbReady && baseRoute === "pdfs" && !detailId && (
-                <window.FoldersView folders={pdfFolders} kind="pdf" lang={lang} onOpenFolder={openFolder} onCreateNew={() => setUploadOpen(true)} onMoveAssets={bulkMoveAssets} />
+              {dbReady && !query && !hasFilter && baseRoute === "pdfs" && !detailId && (
+                <window.FoldersView folders={pdfFolders.filter(f => !f.category || f.category === "kampagne")} kind="pdf" lang={lang} onOpenFolder={openFolder} onCreateNew={() => setUploadOpen(true)} onMoveAssets={bulkMoveAssets} />
               )}
-              {dbReady && baseRoute === "pdfs" && currentFolder && (
-                <window.FolderDetailView assets={assets} folder={currentFolder} kind="pdf" lang={lang} onBack={() => setRoute("pdfs")} onOpenAsset={(a) => setOpenAsset(a)} onShareTarget={setShareTarget} onUpload={() => setUploadOpen(true)} onDeleteAssets={deleteAssets} onBulkAddTag={bulkAddTag} onBulkSetAuthor={bulkSetAuthor} onBulkMoveAssets={bulkMoveAssets} imageFolders={imageFolders} pdfFolders={pdfFolders} />
+              {dbReady && !query && !hasFilter && baseRoute === "pdfs" && currentFolder && (
+                <window.FolderDetailView assets={assets} folder={currentFolder} kind="pdf" lang={lang} onBack={() => setRoute("pdfs")} onOpenFolder={openFolder} onOpenAsset={openAssetWith} onShareTarget={setShareTarget} onUpload={() => setUploadOpen(true)} onDeleteAssets={deleteAssets} onBulkAddTag={bulkAddTag} onBulkSetAuthor={bulkSetAuthor} onBulkMoveAssets={bulkMoveAssets} imageFolders={imageFolders} pdfFolders={pdfFolders} />
               )}
-              {dbReady && baseRoute === "tags" && <window.TagsView assets={assets} tags={tags} onSaveTag={saveTag} onDeleteTag={deleteTag} onOpenAsset={(a) => setOpenAsset(a)} lang={lang} />}
-              {baseRoute === "shared" && <window.SharedView onOpenShare={() => setRoute("external")} lang={lang} />}
-              {baseRoute === "admin" && user?.email === window.SUPERADMIN_EMAIL && (
+              {dbReady && !query && !hasFilter && baseRoute === "literatur" && !detailId && (
+                <window.FoldersView folders={pdfFolders.filter(f => f.category === "literatur")} kind="pdf" lang={lang} onOpenFolder={openFolder} onCreateNew={() => setUploadOpen(true)} onMoveAssets={bulkMoveAssets} />
+              )}
+              {dbReady && !query && !hasFilter && baseRoute === "literatur" && currentFolder && (
+                <window.FolderDetailView assets={assets} folder={currentFolder} kind="pdf" lang={lang} onBack={() => setRoute("literatur")} onOpenFolder={openFolder} onOpenAsset={openAssetWith} onShareTarget={setShareTarget} onUpload={() => setUploadOpen(true)} onDeleteAssets={deleteAssets} onBulkAddTag={bulkAddTag} onBulkSetAuthor={bulkSetAuthor} onBulkMoveAssets={bulkMoveAssets} imageFolders={imageFolders} pdfFolders={pdfFolders} />
+              )}
+              {dbReady && !query && !hasFilter && baseRoute === "tags" && <window.TagsView assets={assets} tags={tags} onSaveTag={saveTag} onDeleteTag={deleteTag} onOpenAsset={openAssetWith} lang={lang} />}
+              {!query && !hasFilter && baseRoute === "shared" && <window.SharedView onOpenShare={() => setRoute("external")} lang={lang} />}
+              {!query && !hasFilter && baseRoute === "admin" && user?.email === window.SUPERADMIN_EMAIL && (
                 <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
                   <window.AdminView lang={lang} />
                 </div>
               )}
-              {baseRoute === "dev" && <window.AdminView lang={lang} />}
-              {baseRoute === "settings" && <window.SettingsView lang={lang} setLang={setLang} theme={theme} setTheme={setTheme} density={density} setDensity={setDensity} team={team} onSaveTeamMember={saveTeamMember} onDeleteTeamMember={deleteTeamMember} tags={tags} onSaveTag={saveTag} onDeleteTag={deleteTag} />}
+              {!query && !hasFilter && baseRoute === "dev" && <window.AdminView lang={lang} />}
+              {!query && !hasFilter && baseRoute === "settings" && <window.SettingsView lang={lang} setLang={setLang} theme={theme} setTheme={setTheme} density={density} setDensity={setDensity} team={team} onSaveTeamMember={saveTeamMember} onDeleteTeamMember={deleteTeamMember} tags={tags} onSaveTag={saveTag} onDeleteTag={deleteTag} />}
             </div>
           </div>
         </div>
       )}
 
-      <window.AssetDetailModal open={!!openAsset} asset={openAsset} peerAssets={peerAssets} onNavigate={(a) => setOpenAsset(a)} onClose={() => setOpenAsset(null)} onShare={(a) => setShareTarget({ asset: a })} onChange={changeAsset} onDelete={deleteAssets} lang={lang} />
+      <window.AssetDetailModal open={!!openAsset} asset={openAsset} peerAssets={openPeers || peerAssets} onNavigate={(a) => setOpenAsset(a)} onClose={() => { setOpenAsset(null); setOpenPeers(null); }} onShare={(a) => setShareTarget({ asset: a })} onChange={changeAsset} onDelete={deleteAssets} lang={lang} />
       <window.ShareDialog open={!!shareTarget} target={shareTarget} onClose={() => setShareTarget(null)} onShared={(m) => setToast(m)} lang={lang} />
       <window.UploadModal open={uploadOpen} onClose={() => setUploadOpen(false)} defaultFolder={currentFolder?.id} area={area} onUploaded={(n) => setToast(lang === "de" ? `${n} Dateien hochgeladen` : `${n} files uploaded`)} lang={lang} />
       <window.Toast msg={toast} onDone={() => setToast(null)} />

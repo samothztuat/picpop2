@@ -124,6 +124,9 @@ async function seedIfEmpty() {
     // DB already seeded — ensure new content exists
     await seedPrintTags();
     await seedUnsortedFolders();
+    await seedTagCategories();
+    await deleteUnassignedTagDocs();   // remove any persisted t-unassigned-* docs
+    await migrateAssetUnassignedTags();
     return;
   }
 
@@ -146,6 +149,88 @@ async function seedPrintTags() {
   if (printTags.length === 0) return;
   await writeBatch("tags", printTags);
   console.log("✓ Print tags seeded");
+}
+
+// Virtual tags for "Nicht zugeordnet" — exist only in memory, never in Firestore.
+// Stored as IDs on assets for filtering, but tag documents are NOT persisted.
+const VIRTUAL_UNASSIGNED_TAGS = [
+  { id: "t-unassigned-motiv",    name: "Nicht zugeordnet", name_en: "Unassigned", category: "motiv",    hue: 0, isVirtual: true },
+  { id: "t-unassigned-kampagne", name: "Nicht zugeordnet", name_en: "Unassigned", category: "kampagne", hue: 0, isVirtual: true },
+  { id: "t-unassigned-medium",   name: "Nicht zugeordnet", name_en: "Unassigned", category: "medium",   hue: 0, isVirtual: true },
+];
+window.VIRTUAL_UNASSIGNED_TAGS = VIRTUAL_UNASSIGNED_TAGS;
+
+// Delete any lingering t-unassigned-* tag documents from Firestore (one-time cleanup)
+async function deleteUnassignedTagDocs() {
+  try {
+    const snap = await tenantCol("tags").get();
+    const stale = snap.docs.filter(d => d.id.startsWith("t-unassigned-"));
+    if (!stale.length) return;
+    const batch = db.batch();
+    stale.forEach(d => batch.delete(d.ref));
+    await batch.commit();
+    console.log(`✓ Deleted ${stale.length} stale unassigned tag docs`);
+  } catch (e) {
+    console.warn("[deleteUnassignedTagDocs]", e.message);
+  }
+}
+
+// Migrate existing assets: write t-unassigned-{cat} for each category with no tag
+async function migrateAssetUnassignedTags() {
+  try {
+    const settingsSnap = await tenantSettingsDoc().get();
+    if (settingsSnap.exists && settingsSnap.data()?.unassignedTagsMigratedAt) return;
+
+    const allTags = window.TAGS || [];
+    const CATS = ["motiv", "kampagne", "medium"];
+
+    const snap = await tenantCol("assets").get();
+    if (snap.empty) {
+      await tenantSettingsDoc().set({ unassignedTagsMigratedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge: true });
+      return;
+    }
+
+    const toUpdate = [];
+    snap.docs.forEach(doc => {
+      const a = doc.data();
+      const newTags = [...(a.tags || [])];
+      let changed = false;
+      CATS.forEach(cat => {
+        const hasTag = newTags.some(tid => allTags.find(t => t.id === tid)?.category === cat);
+        if (!hasTag) {
+          const uid = `t-unassigned-${cat}`;
+          if (!newTags.includes(uid)) { newTags.push(uid); changed = true; }
+        }
+      });
+      if (changed) toUpdate.push({ ...a, tags: newTags });
+    });
+
+    if (toUpdate.length > 0) {
+      // Use update (not set) to avoid overwriting concurrent edits
+      for (let i = 0; i < toUpdate.length; i += 400) {
+        const batch = db.batch();
+        toUpdate.slice(i, i + 400).forEach(asset => {
+          batch.update(tenantCol("assets").doc(asset.id), { tags: asset.tags });
+        });
+        await batch.commit();
+      }
+    }
+
+    await tenantSettingsDoc().set({ unassignedTagsMigratedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge: true });
+    console.log(`✓ Unassigned tag migration: ${toUpdate.length} assets updated`);
+  } catch (e) {
+    console.warn("[migrateAssetUnassignedTags]", e.message);
+  }
+}
+
+// Ensure tag category fields are up-to-date in Firestore
+async function seedTagCategories() {
+  const tagsWithCat = (window.TAGS || []).filter(t => t.category);
+  if (tagsWithCat.length === 0) return;
+  const snap = await tenantCol("tags").where("category", "==", "motiv").limit(1).get();
+  if (!snap.empty) return; // already migrated
+  await writeBatch("tags", tagsWithCat);
+  console.log("✓ Tag categories migrated");
 }
 
 // ── Real-time subscriptions ───────────────────────────────────────────────────
@@ -189,6 +274,20 @@ function subscribeToTags(cb) {
 
 function subscribeToTeam(cb) {
   return tenantCol("team").onSnapshot(snap => cb(snap.docs.map(d => d.data())));
+}
+
+function subscribeToTagCollections(cb) {
+  return tenantCol("tagCollections").onSnapshot(snap => {
+    const docs = snap.docs.map(d => d.data());
+    docs.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+    cb(docs);
+  });
+}
+async function dbSaveTagCollection(col) {
+  await tenantCol("tagCollections").doc(col.id).set(col);
+}
+async function dbDeleteTagCollection(id) {
+  await tenantCol("tagCollections").doc(id).delete();
 }
 
 // ── Write operations ──────────────────────────────────────────────────────────
@@ -254,7 +353,70 @@ async function dbReorderFolders(orderedIds, isPdf = false) {
   await batch.commit();
 }
 
-async function uploadAsset(file, folderId, tags = [], onProgress = null, author = "Tom Tautz", authorRole = "in_house") {
+// ── Extract file creation date ────────────────────────────────────────────────
+// Tries EXIF DateTimeOriginal from JPEG binary; falls back to file.lastModified.
+async function getFileDate(file) {
+  if (file.type === "image/jpeg" || /\.jpe?g$/i.test(file.name)) {
+    try {
+      const buf  = await file.slice(0, 65536).arrayBuffer();
+      const view = new DataView(buf);
+      if (view.getUint16(0) !== 0xFFD8) throw new Error("not jpeg");
+
+      let offset = 2;
+      while (offset < view.byteLength - 4) {
+        const marker = view.getUint16(offset);
+        const segLen = view.getUint16(offset + 2); // includes the 2 length bytes
+        if (marker === 0xFFE1) {
+          // APP1 — check for "Exif" header
+          const hdr = String.fromCharCode(
+            view.getUint8(offset + 4), view.getUint8(offset + 5),
+            view.getUint8(offset + 6), view.getUint8(offset + 7)
+          );
+          if (hdr === "Exif") {
+            const tiff       = offset + 10; // TIFF data starts after "Exif\x00\x00"
+            const le         = view.getUint16(tiff) === 0x4949;
+            const u16        = o => view.getUint16(tiff + o, le);
+            const u32        = o => view.getUint32(tiff + o, le);
+            const ifd0Off    = u32(4);
+            const ifd0Count  = u16(ifd0Off);
+
+            // Find ExifIFD pointer (tag 0x8769) in IFD0
+            let exifIfdOff = null;
+            for (let i = 0; i < ifd0Count; i++) {
+              const e = ifd0Off + 2 + i * 12;
+              if (u16(e) === 0x8769) { exifIfdOff = u32(e + 8); break; }
+            }
+
+            // Search for DateTimeOriginal (0x9003) in ExifIFD
+            const findDT = ifdOff => {
+              if (ifdOff == null) return null;
+              const cnt = u16(ifdOff);
+              for (let i = 0; i < cnt; i++) {
+                const e = ifdOff + 2 + i * 12;
+                if (u16(e) !== 0x9003) continue;
+                const dataOff = u32(e + 8); // ASCII offset from TIFF start
+                let s = "";
+                for (let j = 0; j < 19; j++) s += String.fromCharCode(view.getUint8(tiff + dataOff + j));
+                const m = s.match(/^(\d{4}):(\d{2}):(\d{2}) (\d{2}):(\d{2}):(\d{2})$/);
+                if (m) return new Date(+m[1], +m[2]-1, +m[3], +m[4], +m[5], +m[6]).toISOString();
+              }
+              return null;
+            };
+
+            const dt = findDT(exifIfdOff);
+            if (dt) return dt;
+          }
+        }
+        if (segLen < 2) break; // malformed
+        offset += 2 + segLen;
+      }
+    } catch (_) {}
+  }
+  // Fallback: OS file modification date
+  return new Date(file.lastModified).toISOString();
+}
+
+async function uploadAsset(file, folderId, tags = [], onProgress = null, author = "", authorRole = "in_house", area = "images", batchId = null) {
   const id = "a-" + Date.now() + "-" + Math.random().toString(36).slice(2, 6);
   const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
   const ext = file.name.split(".").pop().toLowerCase();
@@ -317,12 +479,40 @@ async function uploadAsset(file, folderId, tags = [], onProgress = null, author 
       }
     }
   } else {
-    await new Promise(res => {
-      const img = new Image();
-      img.onload = () => { width = img.naturalWidth; height = img.naturalHeight; ratio = width / height || 1.5; res(); };
-      img.onerror = res;
-      img.src = storageUrl;
-    });
+    // Generate JPEG thumbnail from local file — no CORS issues, file still in memory
+    const THUMB_LONG = 1400;
+    try {
+      const blobUrl = URL.createObjectURL(file);
+      const imgEl = await new Promise((res, rej) => {
+        const i = new Image();
+        i.onload = () => res(i);
+        i.onerror = rej;
+        i.src = blobUrl;
+      });
+      width  = imgEl.naturalWidth;
+      height = imgEl.naturalHeight;
+      ratio  = width / height || 1.5;
+
+      const scale  = Math.min(1, THUMB_LONG / Math.max(width, height));
+      const cv     = document.createElement("canvas");
+      cv.width     = Math.round(width  * scale);
+      cv.height    = Math.round(height * scale);
+      cv.getContext("2d").drawImage(imgEl, 0, 0, cv.width, cv.height);
+      const thumbBlob = await new Promise(r => cv.toBlob(r, "image/jpeg", 0.85));
+      const thumbRef  = storage.ref(`tenants/${window.TENANT_ID}/thumbnails/${id}/thumb.jpg`);
+      await thumbRef.put(thumbBlob);
+      thumbnailUrl = await thumbRef.getDownloadURL();
+      URL.revokeObjectURL(blobUrl);
+    } catch (e) {
+      console.warn("[uploadAsset] image thumbnail failed:", e.message);
+      // Fallback: read dimensions from storageUrl (no thumbnail generated)
+      await new Promise(res => {
+        const img = new Image();
+        img.onload = () => { width = img.naturalWidth; height = img.naturalHeight; ratio = width / height || 1.5; res(); };
+        img.onerror = res;
+        img.src = storageUrl;
+      });
+    }
   }
 
   // KI-Beschreibung für Bilder — Key nachladen falls noch nicht im Cache
@@ -334,22 +524,38 @@ async function uploadAsset(file, folderId, tags = [], onProgress = null, author 
     }
   }
 
+  const takenAt = await getFileDate(file);
+
+  // Auto-assign "Nicht zugeordnet" for any category with no tag yet
+  const UNASSIGNED_CATS = ["motiv", "kampagne", "medium"];
+  const finalTags = [...tags];
+  UNASSIGNED_CATS.forEach(cat => {
+    const hasTag = finalTags.some(tid => (window.TAGS || []).find(t => t.id === tid)?.category === cat);
+    if (!hasTag) {
+      const uid = `t-unassigned-${cat}`;
+      if (!finalTags.includes(uid)) finalTags.push(uid);
+    }
+  });
+
   const asset = {
     id,
     title: file.name.replace(/\.[^.]+$/, ""),
     kind: isPdf ? "pdf" : "image",
     format: ext.toUpperCase(),
     folderId,
-    tags,
+    tags: finalTags,
     storageUrl,
     storagePath,
     thumbnailUrl,
     size: parseFloat((file.size / 1024 / 1024).toFixed(1)),
     date: new Date().toISOString(),
+    takenAt,
+    area,
     author,
     authorRole,
     hue: Math.floor(Math.random() * 360),
     ratio,
+    batchId: batchId || null,
     notes: "",
     aiDescription,
     campaign: "",
@@ -372,6 +578,7 @@ Object.assign(window, {
   describeImageWithAI,
   seedIfEmpty,
   seedPrintTags,
+  migrateAssetUnassignedTags,
   subscribeToFolders,
   subscribeToPdfFolders,
   subscribeToAssets,
@@ -379,6 +586,9 @@ Object.assign(window, {
   subscribeToSharedLinks,
   subscribeToTags,
   subscribeToTeam,
+  subscribeToTagCollections,
+  dbSaveTagCollection,
+  dbDeleteTagCollection,
   uploadAsset,
   dbSaveAsset,
   dbDeleteAsset,

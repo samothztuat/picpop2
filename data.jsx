@@ -4,7 +4,7 @@ const I18N = {
   de: {
     nav_favorites: "Favoriten",
     nav_recent: "Zuletzt",
-    nav_uploads: "Zuletzt hochgeladen",
+    nav_uploads: "Letzter Import",
     favorite: "Favorit",
     favorite_add: "Zu Favoriten hinzufügen",
     favorite_remove: "Aus Favoriten entfernen",
@@ -145,7 +145,7 @@ const I18N = {
   en: {
     nav_favorites: "Favorites",
     nav_recent: "Recent",
-    nav_uploads: "Recently uploaded",
+    nav_uploads: "Last import",
     favorite: "Favorite",
     favorite_add: "Add to favorites",
     favorite_remove: "Remove from favorites",
@@ -287,18 +287,24 @@ const I18N = {
 
 // Tag library with colors (oklch hues to harmonize)
 const TAGS = [
-  { id: "t-prod",     name: "Produkt",          name_en: "Product",       hue: 25 },
-  { id: "t-port",     name: "Portrait",         name_en: "Portrait",      hue: 50 },
-  { id: "t-event",    name: "Event",            name_en: "Event",         hue: 90 },
-  { id: "t-loc",      name: "Standort",         name_en: "Location",      hue: 140 },
-  { id: "t-press",    name: "Presse",           name_en: "Press",         hue: 200 },
-  { id: "t-social",   name: "Social",           name_en: "Social",        hue: 250 },
-  { id: "t-key",      name: "Keyvisual",        name_en: "Key visual",    hue: 290 },
-  { id: "t-bts",      name: "Behind the Scenes",name_en: "Behind the scenes", hue: 320 },
-  { id: "t-arch",     name: "Architektur",      name_en: "Architecture",  hue: 60 },
-  { id: "t-logo",     name: "Logo",             name_en: "Logo",          hue: 0 },
-  { id: "t-print",    name: "Druck",            name_en: "Print",         hue: 170 },
-  { id: "t-web",      name: "Web",              name_en: "Web",           hue: 220 },
+  // Preset: Nicht zugeordnet — one per category
+  { id: "t-unassigned-motiv",    name: "Nicht zugeordnet", name_en: "Unassigned", hue: 0, category: "motiv" },
+  { id: "t-unassigned-kampagne", name: "Nicht zugeordnet", name_en: "Unassigned", hue: 0, category: "kampagne" },
+  { id: "t-unassigned-medium",   name: "Nicht zugeordnet", name_en: "Unassigned", hue: 0, category: "medium", area: "print" },
+  // Motiv-Tags (Bildinhalt)
+  { id: "t-prod",     name: "Produkt",          name_en: "Product",       hue: 25,  category: "motiv" },
+  { id: "t-port",     name: "Portrait",         name_en: "Portrait",      hue: 50,  category: "motiv" },
+  { id: "t-event",    name: "Event",            name_en: "Event",         hue: 90,  category: "motiv" },
+  { id: "t-loc",      name: "Standort",         name_en: "Location",      hue: 140, category: "motiv" },
+  { id: "t-arch",     name: "Architektur",      name_en: "Architecture",  hue: 60,  category: "motiv" },
+  // Kampagne-Tags (Verwendung)
+  { id: "t-key",      name: "Keyvisual",        name_en: "Key visual",    hue: 290, category: "kampagne" },
+  { id: "t-bts",      name: "Behind the Scenes",name_en: "Behind the scenes", hue: 320, category: "kampagne" },
+  { id: "t-social",   name: "Social",           name_en: "Social",        hue: 250, category: "kampagne" },
+  { id: "t-press",    name: "Presse",           name_en: "Press",         hue: 200, category: "kampagne" },
+  { id: "t-web",      name: "Web",              name_en: "Web",           hue: 220, category: "kampagne" },
+  { id: "t-print",    name: "Druck",            name_en: "Print",         hue: 170, category: "kampagne" },
+  { id: "t-logo",     name: "Logo",             name_en: "Logo",          hue: 0,   category: "kampagne" },
   // Print-Bereich: Kategorie Medium
   { id: "t-med-zeitung",    name: "Tageszeitung",      name_en: "Daily newspaper",    hue: 220, category: "medium",   area: "print" },
   { id: "t-med-magazin",    name: "Magazin",           name_en: "Magazine",           hue: 200, category: "medium",   area: "print" },
@@ -353,6 +359,7 @@ function asset(folderId, title, opts = {}) {
     authorRole: opts.authorRole || "photographer",
     tags: opts.tags || [],
     notes: opts.notes || "",
+    aiDescription: opts.aiDescription || "",
     date: opts.date || "2025-09-14",
     format: opts.format || "JPG",
     width: opts.width || 4032,
@@ -369,13 +376,13 @@ function asset(folderId, title, opts = {}) {
 
 const ASSETS = [
   // Kampagne 2025
-  asset("f-kampagne-25", "Keyvisual Frühjahr — Hero",      { author: "Sarah Lindt",   tags: ["t-key","t-prod"],    date: "2025-09-12", width: 5472, height: 3648, ratio: 1.5, hue: 25, campaign: "Frühjahr 2025", embargo: null }),
-  asset("f-kampagne-25", "Keyvisual Frühjahr — Variante", { author: "Sarah Lindt",   tags: ["t-key","t-social"],  date: "2025-09-12", ratio: 1, hue: 50, campaign: "Frühjahr 2025" }),
-  asset("f-kampagne-25", "Hero Detail 01",                 { author: "Sarah Lindt",   tags: ["t-prod"],            date: "2025-09-12", ratio: 0.75, hue: 90, campaign: "Frühjahr 2025" }),
+  asset("f-kampagne-25", "Keyvisual Frühjahr — Hero",      { author: "Sarah Lindt",   tags: ["t-key","t-prod"],    date: "2025-09-12", width: 5472, height: 3648, ratio: 1.5, hue: 25, campaign: "Frühjahr 2025", embargo: null, aiDescription: "Großformatiges Kampagnenbild mit hellem Hintergrund. Zentrales Produktmotiv in warmen Frühlingstönen, weiche Lichtführung von rechts oben. Minimalistische Komposition mit viel Weißraum, geeignet als Hero-Banner." }),
+  asset("f-kampagne-25", "Keyvisual Frühjahr — Variante", { author: "Sarah Lindt",   tags: ["t-key","t-social"],  date: "2025-09-12", ratio: 1, hue: 50, campaign: "Frühjahr 2025", aiDescription: "Quadratisches Keyvisual-Format für Social Media. Produkt leicht nach links versetzt vor abstraktem Pastellhintergrund, dynamischer Bildaufbau durch diagonale Farbfläche." }),
+  asset("f-kampagne-25", "Hero Detail 01",                 { author: "Sarah Lindt",   tags: ["t-prod"],            date: "2025-09-12", ratio: 0.75, hue: 90, campaign: "Frühjahr 2025", aiDescription: "Nahaufnahme Produktdetail mit scharfer Textur und unscharfem Vordergrund. Warme Farbstimmung, handwerkliche Qualitätsanmutung." }),
   asset("f-kampagne-25", "Hero Detail 02",                 { author: "Sarah Lindt",   tags: ["t-prod","t-print"],  date: "2025-09-12", ratio: 0.75, hue: 200, campaign: "Frühjahr 2025" }),
-  asset("f-kampagne-25", "Outdoor — Bahnhof Bern",         { author: "Felix Marti",   tags: ["t-loc","t-key"],     date: "2025-09-18", ratio: 1.5, hue: 220, campaign: "Frühjahr 2025" }),
+  asset("f-kampagne-25", "Outdoor — Bahnhof Bern",         { author: "Felix Marti",   tags: ["t-loc","t-key"],     date: "2025-09-18", ratio: 1.5, hue: 220, campaign: "Frühjahr 2025", aiDescription: "Großflächige Außenwerbung im Bahnhofskontext. Plakat in zentraler Passantenzone, natürliches Tageslicht, urbane Umgebung mit Bahnhofshalle im Hintergrund." }),
   asset("f-kampagne-25", "Outdoor — Zürich HB",            { author: "Felix Marti",   tags: ["t-loc"],             date: "2025-09-19", ratio: 1.5, hue: 250, campaign: "Frühjahr 2025" }),
-  asset("f-kampagne-25", "Behind the Scenes — Studio",     { author: "Anna Sauter",   tags: ["t-bts"],             date: "2025-09-12", ratio: 1, hue: 320, campaign: "Frühjahr 2025" }),
+  asset("f-kampagne-25", "Behind the Scenes — Studio",     { author: "Anna Sauter",   tags: ["t-bts"],             date: "2025-09-12", ratio: 1, hue: 320, campaign: "Frühjahr 2025", aiDescription: "Blick hinter die Kulissen des Shootings im Fotostudio. Studioaufbau mit Softboxen und Reflektor sichtbar, Stylisten bei der Arbeit am Set." }),
   asset("f-kampagne-25", "Behind the Scenes — Set",        { author: "Anna Sauter",   tags: ["t-bts","t-social"],  date: "2025-09-12", ratio: 1.5, hue: 290 }),
   asset("f-kampagne-25", "Cutout — Produkt freigestellt",  { author: "Rachel Tan",    tags: ["t-prod","t-web"],    date: "2025-09-20", ratio: 1, hue: 60 }),
   asset("f-kampagne-25", "Detail Textur",                  { author: "Sarah Lindt",   tags: ["t-prod"],            date: "2025-09-12", ratio: 0.75, hue: 140 }),
@@ -383,19 +390,19 @@ const ASSETS = [
   asset("f-kampagne-25", "Banner 1200×628",                { author: "Rachel Tan",    tags: ["t-web","t-social"],  date: "2025-10-04", ratio: 1.91, hue: 50 }),
 
   // Presse
-  asset("f-presse", "CEO Portrait — A. Berger",            { author: "Felix Marti", tags: ["t-port","t-press"], date: "2026-01-22", embargo: "2026-06-01", ratio: 0.75, hue: 200 }),
-  asset("f-presse", "CEO Portrait — Querformat",           { author: "Felix Marti", tags: ["t-port","t-press"], date: "2026-01-22", ratio: 1.5, hue: 200 }),
-  asset("f-presse", "Vorstand — Gruppenbild",              { author: "Felix Marti", tags: ["t-press","t-port"], date: "2026-01-22", ratio: 1.5, hue: 170 }),
-  asset("f-presse", "Standort Hauptsitz — Tag",            { author: "Lea Vogel",   tags: ["t-press","t-arch"], date: "2025-08-04", ratio: 1.5, hue: 140 }),
+  asset("f-presse", "CEO Portrait — A. Berger",            { author: "Felix Marti", tags: ["t-port","t-press"], date: "2026-01-22", embargo: "2026-06-01", ratio: 0.75, hue: 200, aiDescription: "Formelles Portrait einer weiblichen Führungsperson vor neutralem dunklem Hintergrund. Professionelle Businesskleidung, direkter Blickkontakt, subtile Schulterlicht-Führung." }),
+  asset("f-presse", "CEO Portrait — Querformat",           { author: "Felix Marti", tags: ["t-port","t-press"], date: "2026-01-22", ratio: 1.5, hue: 200, aiDescription: "Querformat-Variante des CEO-Portraits, geeignet für Presseseiten und Jahresberichte. Person leicht zur Seite gewandt, offenere Körpersprache." }),
+  asset("f-presse", "Vorstand — Gruppenbild",              { author: "Felix Marti", tags: ["t-press","t-port"], date: "2026-01-22", ratio: 1.5, hue: 170, aiDescription: "Gruppenfoto des Vorstands in einem modernen Konferenzraum. Sechs Personen in zwei Reihen, formelle Businesskleidung, gleichmäßige Ausleuchtung." }),
+  asset("f-presse", "Standort Hauptsitz — Tag",            { author: "Lea Vogel",   tags: ["t-press","t-arch"], date: "2025-08-04", ratio: 1.5, hue: 140, aiDescription: "Architekturfotografie des Unternehmenshauptsitzes bei Tageslicht. Modernes Glasgebäude mit Eingangsbereich, blaues Firmenschild sichtbar, gepflegte Grünanlage im Vordergrund." }),
   asset("f-presse", "Standort Hauptsitz — Abend",          { author: "Lea Vogel",   tags: ["t-press","t-arch"], date: "2025-08-04", ratio: 1.5, hue: 220 }),
   asset("f-presse", "Logo — auf Weiß",                     { author: "in-house", authorRole: "designer", tags: ["t-logo","t-press"], date: "2024-04-01", ratio: 1, hue: 0 }),
   asset("f-presse", "Logo — auf Schwarz",                  { author: "in-house", authorRole: "designer", tags: ["t-logo","t-press"], date: "2024-04-01", ratio: 1, hue: 0 }),
   asset("f-presse", "Pressekonferenz März",                { author: "Anna Sauter", tags: ["t-press","t-event"], date: "2026-03-08", ratio: 1.5, hue: 90 }),
 
   // Produktshots
-  asset("f-produkt", "Hauptprodukt — Front",     { author: "Rachel Tan", tags: ["t-prod","t-web"], date: "2025-11-04", ratio: 1, hue: 60 }),
-  asset("f-produkt", "Hauptprodukt — Drei-Viertel",{author: "Rachel Tan", tags: ["t-prod","t-print"], date: "2025-11-04", ratio: 1, hue: 60 }),
-  asset("f-produkt", "Hauptprodukt — Rückseite", { author: "Rachel Tan", tags: ["t-prod"], date: "2025-11-04", ratio: 1, hue: 50 }),
+  asset("f-produkt", "Hauptprodukt — Front",     { author: "Rachel Tan", tags: ["t-prod","t-web"], date: "2025-11-04", ratio: 1, hue: 60, aiDescription: "Freigestellte Frontansicht des Hauptprodukts auf weißem Hintergrund. Klare Produktlinien, hochwertige Oberflächenstruktur sichtbar, ideal für Webshop und Katalog." }),
+  asset("f-produkt", "Hauptprodukt — Drei-Viertel",{author: "Rachel Tan", tags: ["t-prod","t-print"], date: "2025-11-04", ratio: 1, hue: 60, aiDescription: "Drei-Viertel-Ansicht des Produkts zeigt Tiefe und Formgebung. Leichter Schattenwurf verleiht Plastizität, Hintergrund weich ausgeblendet." }),
+  asset("f-produkt", "Hauptprodukt — Rückseite", { author: "Rachel Tan", tags: ["t-prod"], date: "2025-11-04", ratio: 1, hue: 50, aiDescription: "Rückansicht mit sichtbaren technischen Details und Anschlüssen. Klarer Informationsgehalt für technische Dokumentation." }),
   asset("f-produkt", "Verpackung — Front",        { author: "Rachel Tan", tags: ["t-prod"], date: "2025-11-05", ratio: 0.75, hue: 25 }),
   asset("f-produkt", "Verpackung — Detail",       { author: "Rachel Tan", tags: ["t-prod"], date: "2025-11-05", ratio: 0.75, hue: 25 }),
   asset("f-produkt", "Variante A — Cutout",       { author: "Rachel Tan", tags: ["t-prod","t-web"], date: "2025-11-06", ratio: 1, hue: 90 }),
