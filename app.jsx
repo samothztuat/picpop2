@@ -509,7 +509,12 @@ function Sidebar({ area, setArea, folders, route, setRoute, lang, onUpload, onCr
                     />
                   )}
                   <FolderRow folder={f}
-                    liveCount={(assets || window.ASSETS || []).filter(a => a.folderId === f.id).length}
+                    liveCount={(() => {
+                      const all = (assets || window.ASSETS || []).filter(a => a.folderId === f.id);
+                      return (f.id === "f-unsorted" || f.id === "p-unsorted")
+                        ? all.filter(a => (a.tags || []).length === 0).length
+                        : all.length;
+                    })()}
                     active={baseRoute === routeBase && detailId === f.id}
                     dragOverHint={overId === f.id && dragId !== f.id && dragId !== null}
                     hasChildren={hasChildren} isExpanded={isExpanded} onToggleExpand={toggleExpand}
@@ -1460,7 +1465,11 @@ function App() {
 
   const baseRoute = route.split(":")[0];
   const detailId = route.split(":")[1];
-  const currentFolder = detailId ? folders.find(f => f.id === detailId) : null;
+  const currentFolder = detailId
+    ? (folders.find(f => f.id === detailId) ||
+       (detailId === "f-unsorted" ? { id: "f-unsorted", name: lang === "de" ? "Nicht zugeordnet" : "Unsorted", count: 0, updated: "" } : null) ||
+       (detailId === "p-unsorted" ? { id: "p-unsorted", name: lang === "de" ? "Nicht zugeordnet" : "Unsorted", count: 0, updated: "" } : null))
+    : null;
 
   const { TweaksPanel, TweakSection, TweakRadio, TweakColor } = window;
 
