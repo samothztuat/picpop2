@@ -274,9 +274,25 @@ function KiBatchTab() {
   const [log, setLog]           = useStateKI([]);
   const [progress, setProgress] = useStateKI({ done: 0, total: 0, errors: 0 });
   const stopRef                 = useRefKI(false);
+  const logRef                  = useRefKI(null);
 
   function addLog(msg, type = 'info') {
-    setLog(prev => [...prev, { msg, type, ts: Date.now() }]);
+    setLog(prev => [...prev, { msg, type }]);
+    // auto-scroll
+    setTimeout(() => { if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight; }, 50);
+  }
+
+  // Wählt die richtige Analysefunktion je nach Asset-Typ und Bereich
+  function pickFn(asset) {
+    if (asset.kind === 'pdf')                        return window.describePdfWithAI;
+    if (asset.area === 'print' || asset.kind !== 'image') return window.describePrintImageWithAI;
+    return window.describeImageWithAI;
+  }
+
+  function typeLabel(asset) {
+    if (asset.kind === 'pdf')   return '[PDF Text]';
+    if (asset.area === 'print') return '[Print Bild]';
+    return '[Foto]';
   }
 
   async function runBatch() {
@@ -290,60 +306,66 @@ function KiBatchTab() {
       // 1. AI-Config laden
       if (!window.AI_CONFIG?.openaiKey) await window.loadAiConfig();
       if (!window.AI_CONFIG?.openaiKey) {
-        addLog('⚠ Kein OpenAI-Key gefunden. Bitte in den Einstellungen hinterlegen.', 'error');
-        setStatus('error');
-        return;
-      }
-      if (!window.pdfjsLib) {
-        addLog('⚠ PDF.js nicht geladen.', 'error');
-        setStatus('error');
-        return;
+        addLog('⚠ Kein OpenAI-Key — bitte in den Einstellungen hinterlegen.', 'error');
+        setStatus('error'); return;
       }
 
-      // 2. Alle PDF-Assets ohne aiDescription aus Firestore laden
-      addLog('Lade PDF-Assets aus Firestore…');
-      const snap = await window.tenantCol('assets')
-        .where('kind', '==', 'pdf')
-        .get();
-      const pdfs = snap.docs
-        .map(d => d.data())
-        .filter(a => !a.aiDescription && a.storageUrl);
+      // 2. Alle Assets ohne aiDescription aus Firestore laden (drei Queries, da Firestore kein OR unterstützt)
+      addLog('Lade Assets ohne KI-Beschreibung…');
+      const [snapPdf, snapImg] = await Promise.all([
+        window.tenantCol('assets').where('kind', '==', 'pdf').get(),
+        window.tenantCol('assets').where('kind', '==', 'image').get(),
+      ]);
 
-      addLog(`${pdfs.length} PDFs ohne KI-Beschreibung gefunden.`);
-      setProgress({ done: 0, total: pdfs.length, errors: 0 });
+      const todo = [
+        ...snapPdf.docs.map(d => d.data()),
+        ...snapImg.docs.map(d => d.data()),
+      ].filter(a => !a.aiDescription && a.storageUrl);
 
-      if (pdfs.length === 0) {
-        addLog('✓ Alle PDFs haben bereits eine KI-Beschreibung.', 'success');
-        setStatus('done');
-        return;
+      // Sortierung: PDFs zuerst, dann Print-Bilder, dann reguläre Bilder
+      todo.sort((a, b) => {
+        const rank = x => x.kind === 'pdf' ? 0 : x.area === 'print' ? 1 : 2;
+        return rank(a) - rank(b);
+      });
+
+      const pdfs   = todo.filter(a => a.kind === 'pdf').length;
+      const prints = todo.filter(a => a.kind === 'image' && a.area === 'print').length;
+      const photos = todo.filter(a => a.kind === 'image' && a.area !== 'print').length;
+
+      addLog(`${todo.length} Assets ohne KI-Beschreibung: ${pdfs} PDFs · ${prints} Print-Bilder · ${photos} Fotos`);
+      setProgress({ done: 0, total: todo.length, errors: 0 });
+
+      if (todo.length === 0) {
+        addLog('✓ Alle Assets haben bereits eine KI-Beschreibung.', 'success');
+        setStatus('done'); return;
       }
 
-      // 3. Batch verarbeiten
+      // 3. Sequenziell verarbeiten
       let done = 0, errors = 0;
-      for (const pdf of pdfs) {
+      for (const asset of todo) {
         if (stopRef.current) { addLog('— Abgebrochen.', 'warn'); break; }
 
-        const name = pdf.title || pdf.id;
-        addLog(`→ ${name}`);
+        const fn   = pickFn(asset);
+        const name = asset.title || asset.id;
+        addLog(`→ ${typeLabel(asset)} ${name}`);
         try {
-          const desc = await window.describePdfWithAI(pdf.storageUrl);
+          const desc = await fn(asset.storageUrl);
           if (desc) {
-            await window.tenantCol('assets').doc(pdf.id).update({ aiDescription: desc });
-            addLog(`  ✓ ${desc.slice(0, 80)}…`, 'success');
+            await window.tenantCol('assets').doc(asset.id).update({ aiDescription: desc });
+            addLog(`  ✓ ${desc.slice(0, 90)}${desc.length > 90 ? '…' : ''}`, 'success');
           } else {
-            addLog(`  ○ Kein Text extrahierbar (leeres PDF?).`, 'warn');
+            addLog(`  ○ Kein Inhalt extrahierbar (leeres Dokument?).`, 'warn');
           }
         } catch (e) {
           errors++;
           addLog(`  ✗ Fehler: ${e.message}`, 'error');
         }
         done++;
-        setProgress({ done, total: pdfs.length, errors });
-        // kurze Pause damit Rate-Limits nicht überschritten werden
-        await new Promise(r => setTimeout(r, 300));
+        setProgress({ done, total: todo.length, errors });
+        await new Promise(r => setTimeout(r, 350)); // Rate-Limit-Schutz
       }
 
-      addLog(`\nFertig: ${done} verarbeitet, ${errors} Fehler.`, done > 0 ? 'success' : 'warn');
+      addLog(`\nFertig — ${done} verarbeitet, ${errors} Fehler.`, errors === 0 ? 'success' : 'warn');
       setStatus('done');
     } catch (e) {
       addLog(`✗ Unerwarteter Fehler: ${e.message}`, 'error');
@@ -357,9 +379,12 @@ function KiBatchTab() {
   return (
     <div style={{ flex: 1, overflowY: 'auto', padding: '28px 32px', display: 'flex', flexDirection: 'column', gap: 20 }}>
       <div>
-        <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 4 }}>KI-Beschreibungen für PDFs</div>
-        <div style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.6 }}>
-          Analysiert alle hochgeladenen PDFs ohne KI-Beschreibung. PDF.js extrahiert den Text (Seiten 1–3), GPT-4o-mini erkennt Headlines und Kernbegriffe.
+        <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 4 }}>KI-Beschreibungen generieren</div>
+        <div style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.7 }}>
+          Nur Assets <em>ohne</em> vorhandene KI-Beschreibung werden verarbeitet.<br/>
+          <strong>PDFs</strong> — PDF.js extrahiert Text (S. 1–3), GPT liest Headlines/Begriffe<br/>
+          <strong>Print-Bilder</strong> — Vision-API mit OCR-Fokus: Texte, Slogans, Kampagnentitel<br/>
+          <strong>Fotos</strong> — Vision-API mit Bildbeschreibungs-Prompt
         </div>
       </div>
 
@@ -385,7 +410,7 @@ function KiBatchTab() {
       )}
 
       {log.length > 0 && (
-        <div style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 6, padding: '12px 16px', fontFamily: 'var(--font-mono)', fontSize: 11, lineHeight: 1.7, maxHeight: 400, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 0 }}>
+        <div ref={logRef} style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 6, padding: '12px 16px', fontFamily: 'var(--font-mono)', fontSize: 11, lineHeight: 1.7, maxHeight: 400, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 0 }}>
           {log.map((l, i) => (
             <div key={i} style={{ color: colMap[l.type] || 'var(--fg-2)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{l.msg}</div>
           ))}

@@ -58,7 +58,7 @@ async function loadAiConfig() {
   }
 }
 
-// ── OpenAI Vision: describe one image ────────────────────────────────────────
+// ── OpenAI Vision: describe one image (Fotografie/Bildinhalt) ────────────────
 async function describeImageWithAI(imageUrl) {
   const key    = window.AI_CONFIG.openaiKey;
   const prompt = window.AI_CONFIG.prompt || window.AI_DEFAULT_PROMPT || "";
@@ -84,6 +84,36 @@ async function describeImageWithAI(imageUrl) {
     return data.choices?.[0]?.message?.content?.trim() || null;
   } catch (e) {
     console.warn("[describeImage]", e.message);
+    return null;
+  }
+}
+
+// ── OpenAI Vision: Texte aus Print-Bild extrahieren (Anzeigen, Plakate etc.) ─
+async function describePrintImageWithAI(imageUrl) {
+  const key = window.AI_CONFIG.openaiKey;
+  if (!key || !imageUrl) return null;
+  const prompt = "Lies alle sichtbaren Texte, Überschriften, Slogans, Kampagnentitel und markanten Begriffe aus diesem Print-Werbemittel (Anzeige, Plakat, Broschüre, Flyer). Gib eine kompakte Zusammenfassung (2–3 Sätze) mit allen lesbaren Textinhalten und dem Kernthema. Antworte auf Deutsch. Keine Einleitung, direkt zur Sache.";
+  try {
+    const res = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${key}` },
+      body: JSON.stringify({
+        model: "gpt-4o-mini",
+        max_tokens: 300,
+        messages: [{
+          role: "user",
+          content: [
+            { type: "text",      text: prompt },
+            { type: "image_url", image_url: { url: imageUrl, detail: "high" } },
+          ],
+        }],
+      }),
+    });
+    if (!res.ok) { console.warn("[describePrintImage] HTTP", res.status); return null; }
+    const data = await res.json();
+    return data.choices?.[0]?.message?.content?.trim() || null;
+  } catch (e) {
+    console.warn("[describePrintImage]", e.message);
     return null;
   }
 }
@@ -563,14 +593,21 @@ async function uploadAsset(file, folderId, tags = [], onProgress = null, author 
     }
   }
 
-  // KI-Beschreibung — Bilder via Vision, PDFs via Text-Extraktion
+  // KI-Beschreibung — je nach Typ und Bereich unterschiedliche Analyse
+  // PDF            → Text-Extraktion via PDF.js + GPT
+  // Bild in Print  → Vision mit OCR/Text-Fokus (Anzeigen, Plakate)
+  // Bild in Images → Vision mit Bildbeschreibungs-Prompt
   let aiDescription = "";
   if (storageUrl) {
     if (!window.AI_CONFIG?.openaiKey) await loadAiConfig();
     if (window.AI_CONFIG?.openaiKey) {
-      aiDescription = isPdf
-        ? (await describePdfWithAI(storageUrl)) || ""
-        : (await describeImageWithAI(storageUrl)) || "";
+      if (isPdf) {
+        aiDescription = (await describePdfWithAI(storageUrl)) || "";
+      } else if (area === "print") {
+        aiDescription = (await describePrintImageWithAI(storageUrl)) || "";
+      } else {
+        aiDescription = (await describeImageWithAI(storageUrl)) || "";
+      }
     }
   }
 
@@ -626,6 +663,7 @@ Object.assign(window, {
   tenantSettingsDoc,
   loadAiConfig,
   describeImageWithAI,
+  describePrintImageWithAI,
   describePdfWithAI,
   seedIfEmpty,
   seedPrintTags,

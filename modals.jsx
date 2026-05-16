@@ -477,11 +477,17 @@ function AssetDetailModal({ open, asset: assetProp, peerAssets, onNavigate, onCl
                       style={{ marginLeft: "auto", fontSize: 11 }}
                       onClick={async () => {
                         if (!asset.storageUrl) return;
-                        const fn = asset.kind === "pdf" ? window.describePdfWithAI : window.describeImageWithAI;
+                        const fn = asset.kind === "pdf"
+                          ? window.describePdfWithAI
+                          : asset.area === "print"
+                            ? window.describePrintImageWithAI
+                            : window.describeImageWithAI;
                         const desc = await fn?.(asset.storageUrl);
                         if (desc) { setAiDesc(desc); save({ aiDescription: desc }); }
                       }}
-                      title={lang === "de" ? (asset.kind === "pdf" ? "Text aus PDF extrahieren und analysieren" : "KI-Beschreibung jetzt generieren") : (asset.kind === "pdf" ? "Extract & analyse PDF text" : "Generate AI description now")}
+                      title={lang === "de"
+                        ? (asset.kind === "pdf" ? "Text aus PDF extrahieren" : asset.area === "print" ? "Texte und Slogans aus Print-Bild lesen" : "KI-Beschreibung generieren")
+                        : (asset.kind === "pdf" ? "Extract PDF text" : asset.area === "print" ? "Read text from print image" : "Generate AI description")}
                     >
                       ✦ {lang === "de" ? "Generieren" : "Generate"}
                     </button>
