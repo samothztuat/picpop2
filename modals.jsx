@@ -8,7 +8,9 @@ function AssetDetailModal({ open, asset: assetProp, peerAssets, onNavigate, onCl
   // localAsset: set AFTER the next image has loaded so text+image flip simultaneously
   const [localAsset, setLocalAsset] = useStateM(null);
   const asset = localAsset || assetProp;
-  const navTimerRef = useRefM(null);           // cleanup handle for navigate timeout
+  const navTimerRef   = useRefM(null);   // cleanup handle for navigate timeout
+  const navInFlightRef = useRefM(null);  // img object of pending navigation (cancel on rapid press)
+  const [imgLoading, setImgLoading] = useStateM(false); // subtle loading indicator
   const [tags, setTags] = useStateM(asset?.tags ?? []);
   const [notes, setNotes] = useStateM(asset?.notes ?? "");
   const [title, setTitle] = useStateM(asset?.title ?? "");
@@ -42,17 +44,18 @@ function AssetDetailModal({ open, asset: assetProp, peerAssets, onNavigate, onCl
     }
   }, [assetProp?.id]);
 
-  // Preload prev + next images (including mock imgUrl fallback)
+  // Preload ±3 neighbours using thumbnailUrl (fast JPEG) for instant navigation
   useEffectM(() => {
     if (!open || !asset || asset.kind === "pdf") return;
     const peers = peerAssets || [];
     const idx = peers.findIndex(a => a.id === asset.id);
-    [-2, -1, 1, 2].forEach(offset => {
+    // Prioritise forward direction (likely next press); load in order: +1, -1, +2, -2, +3, -3
+    [1, -1, 2, -2, 3, -3].forEach(offset => {
       const p = peers[idx + offset];
       if (!p || p.kind === "pdf") return;
       const ratio = p.ratio || 1;
       const src = p.thumbnailUrl || p.storageUrl
-        || (p.id ? window.imgUrl(p.id + "-" + (p.title || ""), 1200, Math.round(1200 / ratio)) : null);
+        || (p.id ? window.imgUrl(p.id + "-" + (p.title || ""), 800, Math.round(800 / ratio)) : null);
       if (src) { const img = new Image(); img.src = src; }
     });
   }, [asset?.id, peerAssets]);
@@ -102,31 +105,49 @@ function AssetDetailModal({ open, asset: assetProp, peerAssets, onNavigate, onCl
   const prevAsset = peerIdx > 0 ? peers[peerIdx - 1] : null;
   const nextAsset = peerIdx >= 0 && peerIdx < peers.length - 1 ? peers[peerIdx + 1] : null;
 
-  // Navigate instantly — sets local state immediately, parent syncs in background
-  // navigate: notify parent immediately, then wait for image to load before flipping
-  // so text + image always switch at the same moment.
+  // navigate: fast image switching.
+  // 1. Cancel any in-flight navigation immediately (rapid pressing = no stacking)
+  // 2. Check browser cache first — if hit, switch this frame
+  // 3. Otherwise show loading state, wait max 100 ms, then switch regardless
   function navigate(target) {
-    onNavigate?.(target); // parent syncs in background
-    if (target.kind === "pdf") { setLocalAsset(target); return; }
+    onNavigate?.(target);
+    if (target.kind === "pdf") { setLocalAsset(target); setImgLoading(false); return; }
+
+    // Cancel previous pending navigation
+    clearTimeout(navTimerRef.current);
+    if (navInFlightRef.current) {
+      navInFlightRef.current.onload  = null;
+      navInFlightRef.current.onerror = null;
+      navInFlightRef.current = null;
+    }
 
     const ratio = target.ratio || 1;
+    // Use thumbnailUrl for fast switching — it's a pre-generated JPEG, much smaller than storageUrl
     const src = target.thumbnailUrl || target.storageUrl
-      || (target.id ? window.imgUrl(target.id + "-" + (target.title || ""), 1200, Math.round(1200 / ratio)) : null);
+      || (target.id ? window.imgUrl(target.id + "-" + (target.title || ""), 800, Math.round(800 / ratio)) : null);
 
-    if (!src) { setLocalAsset(target); return; }
+    if (!src) { setLocalAsset(target); setImgLoading(false); return; }
 
     const img = new Image();
     img.src = src;
 
-    // Already in browser cache — switch this frame
-    if (img.complete && img.naturalWidth > 0) { setLocalAsset(target); return; }
+    // Cache hit — switch this frame, no flicker
+    if (img.complete && img.naturalWidth > 0) {
+      setLocalAsset(target); setImgLoading(false); return;
+    }
 
-    // Not cached yet — wait for load, max 350 ms before giving up and switching anyway
-    clearTimeout(navTimerRef.current);
-    const fire = () => { clearTimeout(navTimerRef.current); setLocalAsset(target); };
+    // Not cached — show loading indicator, switch after 100 ms max
+    setImgLoading(true);
+    navInFlightRef.current = img;
+    const fire = () => {
+      clearTimeout(navTimerRef.current);
+      navInFlightRef.current = null;
+      setImgLoading(false);
+      setLocalAsset(target);
+    };
     img.onload  = fire;
     img.onerror = fire;
-    navTimerRef.current = setTimeout(fire, 350);
+    navTimerRef.current = setTimeout(fire, 100);
   }
 
   // Never expose virtual "Nicht zugeordnet" preset tags in the picker — they are display-only
@@ -282,13 +303,22 @@ function AssetDetailModal({ open, asset: assetProp, peerAssets, onNavigate, onCl
             </div>
           ) : (
             // Real image — fill column, longest side fits, no crop
-            <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: 24, minHeight: 0 }}>
+            <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: 24, minHeight: 0, position: "relative" }}>
               <img
-                src={asset.storageUrl || window.imgUrl(asset.id + "-" + asset.title, 1200, Math.round(1200 / (asset.ratio || 1)))}
+                key={asset.id}
+                src={asset.thumbnailUrl || asset.storageUrl || window.imgUrl(asset.id + "-" + asset.title, 800, Math.round(800 / (asset.ratio || 1)))}
                 alt={asset.title}
                 draggable={false}
-                style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain", display: "block" }}
+                decoding="async"
+                style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain", display: "block", transition: "opacity 0.12s" }}
               />
+              {imgLoading && (
+                <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", background: "var(--bg)", opacity: 0.55, pointerEvents: "none" }}>
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" strokeWidth="2" strokeLinecap="round" style={{ animation: "spin 0.7s linear infinite" }}>
+                    <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
+                  </svg>
+                </div>
+              )}
             </div>
           )}
 
