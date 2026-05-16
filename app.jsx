@@ -582,7 +582,12 @@ function Sidebar({ area, setArea, folders, route, setRoute, lang, onUpload, onCr
                       />
                     )}
                     <FolderRow folder={f}
-                      liveCount={(assets || window.ASSETS || []).filter(a => a.folderId === f.id).length}
+                      liveCount={(() => {
+                        const all = (assets || window.ASSETS || []).filter(a => a.folderId === f.id);
+                        return (f.id === "f-unsorted" || f.id === "p-unsorted")
+                          ? all.filter(a => (a.tags || []).length === 0).length
+                          : all.length;
+                      })()}
                       active={baseRoute === "folders" && detailId === f.id}
                       dragOverHint={overId === f.id && dragId !== f.id && dragId !== null}
                       hasChildren={hasChildren} isExpanded={isExpanded} onToggleExpand={toggleExpand}

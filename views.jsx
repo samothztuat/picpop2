@@ -465,15 +465,18 @@ function FolderDetailView({ assets: assetsProp, folder, onBack, onOpenAsset, onO
   const lastSelRef = useRefV(null);
   const tagCols = useTagCols(lang);
 
+  const isUnsorted = folder.id === "f-unsorted" || folder.id === "p-unsorted";
   const assets = useMemoV(() => {
     let xs = allAssets.filter(a => a.folderId === folder.id);
+    // "Nicht zugeordnet" only lists truly tag-free assets
+    if (isUnsorted) xs = xs.filter(a => (a.tags || []).length === 0);
     if (q) xs = xs.filter(a => { const lq = q.toLowerCase(); return a.title.toLowerCase().includes(lq) || a.author.toLowerCase().includes(lq) || (a.notes||"").toLowerCase().includes(lq) || (a.aiDescription||"").toLowerCase().includes(lq); });
     if (filterTags.size > 0) xs = xs.filter(a => [...filterTags].every(tid => a.tags.includes(tid)));
     if (filterAuthor) xs = xs.filter(a => a.author === filterAuthor);
     if (sort === "date") xs = [...xs].sort((a,b) => (a.date < b.date ? 1 : -1));
     if (sort === "title") xs = [...xs].sort((a,b) => a.title.localeCompare(b.title));
     return xs;
-  }, [allAssets, folder.id, q, sort, filterTags, filterAuthor]);
+  }, [allAssets, folder.id, isUnsorted, q, sort, filterTags, filterAuthor]);
 
   function onToggleSelect(id, shift) {
     setSelection(prev => {
