@@ -610,24 +610,53 @@ function AssetDetailModal({ open, asset: assetProp, peerAssets, onNavigate, onCl
 function ShareDialog({ open, target, onClose, onShared, lang }) {
   const t = window.makeT(lang);
   const [viewOnly, setViewOnly] = useStateM(true);
-  const [expires, setExpires] = useStateM("2026-08-12");
+  const [expires, setExpires] = useStateM(() => {
+    const d = new Date(); d.setMonth(d.getMonth() + 3);
+    return d.toISOString().slice(0, 10);
+  });
   const [recipients, setRecipients] = useStateM("");
   const [message, setMessage] = useStateM("");
+  const [slug, setSlug] = useStateM("");
   const [link, setLink] = useStateM("");
   const [copied, setCopied] = useStateM(false);
+  const [saving, setSaving] = useStateM(false);
+  const [saved, setSaved] = useStateM(false);
 
   useEffectM(() => {
     if (!open || !target) return;
-    const slug = (target.folder ? "f-" : "a-") + Math.random().toString(36).slice(2, 8);
-    setLink(`https://picpop.app/s/${slug}`);
+    const s = (target.folder ? "f-" : "a-") + Math.random().toString(36).slice(2, 9);
+    setSlug(s);
+    setLink(`${window.location.origin}/s/${s}`);
     setCopied(false);
+    setSaved(false);
   }, [open, target]);
 
   if (!target) return null;
-  const label = target.folder ? target.folder.name : target.asset.title;
-  const count = target.folder ? target.folder.count : 1;
+  const label = target.folder ? target.folder.name : (target.asset?.title || "");
+  const count = target.folder ? (target.folder.count || 0) : 1;
 
-  function copy() {
+  async function createAndCopy() {
+    if (!saved) {
+      setSaving(true);
+      try {
+        await window.dbCreateShareLink(slug, {
+          id: slug,
+          folderId: target.folder?.id || null,
+          assetId: target.asset?.id || null,
+          label,
+          viewOnly,
+          expires,
+          recipients,
+          message,
+          by: window.CURRENT_USER?.uid || null,
+          byName: window.CURRENT_USER?.displayName || window.CURRENT_USER?.email || "",
+        });
+        setSaved(true);
+      } catch (err) {
+        console.error("ShareLink save failed:", err);
+      }
+      setSaving(false);
+    }
     navigator.clipboard?.writeText(link);
     setCopied(true);
     onShared?.(t("link_copied"));
@@ -641,7 +670,7 @@ function ShareDialog({ open, target, onClose, onShared, lang }) {
         <div style={{ color: "var(--muted)", fontSize: 13, marginTop: 4 }}>
           {target.folder
             ? t("asset_count_other", { n: count })
-            : `${target.asset.format} · ${target.asset.width}×${target.asset.height}`}
+            : target.asset ? `${target.asset.format} · ${target.asset.width}×${target.asset.height}` : ""}
         </div>
       </div>
 
@@ -652,11 +681,11 @@ function ShareDialog({ open, target, onClose, onShared, lang }) {
             <window.Icon.link size={14} />
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 12, color: "var(--muted)" }}>{t("link_active")} · {t("share_view_only")}</div>
-            <div className="num clamp-1" style={{ fontSize: 13 }}>{link}</div>
+            <div style={{ fontSize: 12, color: "var(--muted)" }}>{t("link_active")} · {viewOnly ? t("share_view_only") : (lang === "de" ? "Download erlaubt" : "Download allowed")}</div>
+            <a href={link} target="_blank" rel="noopener noreferrer" className="num clamp-1" style={{ fontSize: 13, color: "var(--fg)", textDecoration: "none" }}>{link}</a>
           </div>
-          <button className="btn primary sm" onClick={copy}>
-            {copied ? <><window.Icon.check size={12} /> {t("copy")}</> : <><window.Icon.copy size={12} /> {t("copy")}</>}
+          <button className="btn primary sm" onClick={createAndCopy} disabled={saving}>
+            {saving ? "…" : copied ? <><window.Icon.check size={12} /> {t("copy")}</> : <><window.Icon.copy size={12} /> {t("copy")}</>}
           </button>
         </div>
 
@@ -691,7 +720,9 @@ function ShareDialog({ open, target, onClose, onShared, lang }) {
 
       <div style={{ padding: "12px 24px", borderTop: "1px solid var(--line)", display: "flex", justifyContent: "space-between", gap: 8 }}>
         <button className="btn ghost" onClick={onClose}>{t("cancel")}</button>
-        <button className="btn primary" onClick={copy}><window.Icon.copy size={14} /> {t("copy_link")}</button>
+        <button className="btn primary" onClick={createAndCopy} disabled={saving}>
+          {saving ? "…" : <><window.Icon.copy size={14} /> {t("copy_link")}</>}
+        </button>
       </div>
     </window.Modal>
   );

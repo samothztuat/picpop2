@@ -1011,6 +1011,109 @@ function cleanUnassignedTags(tagIds) {
   return result;
 }
 
+// ── Public Share Page ─────────────────────────────────────────────────────────
+// Shown without auth when URL is /s/{slug}
+function PublicSharePage({ slug }) {
+  const [shareData, setShareData] = useStateA(null);
+  const [assets, setAssets] = useStateA([]);
+  const [loading, setLoading] = useStateA(true);
+  const [error, setError] = useStateA(null);
+  const [openA, setOpenA] = useStateA(null);
+
+  useEffectA(() => {
+    window.dbGetShareLink(slug).then(async data => {
+      if (!data) { setError("not_found"); setLoading(false); return; }
+      // Check expiry
+      if (data.expires && new Date(data.expires) < new Date()) {
+        setError("expired"); setLoading(false); return;
+      }
+      setShareData(data);
+      // Load assets from Firestore for this tenant
+      try {
+        const db = firebase.firestore();
+        const col = db.collection("tenants").doc(data.tenant).collection("assets");
+        let snap;
+        if (data.folderId) {
+          snap = await col.where("folderId", "==", data.folderId).get();
+        } else if (data.assetId) {
+          snap = await col.doc(data.assetId).get();
+          snap = { docs: snap.exists ? [snap] : [] };
+        }
+        setAssets((snap?.docs || []).map(d => d.data()));
+      } catch (e) { console.error(e); }
+      setLoading(false);
+    }).catch(() => { setError("error"); setLoading(false); });
+  }, [slug]);
+
+  const spinStyle = { width: 32, height: 32, border: "2.5px solid #e0e0e0", borderTopColor: "#dc2c2c", borderRadius: "50%", animation: "spin 0.7s linear infinite" };
+
+  if (loading) return (
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "100vh", background: "#f5f5f3" }}>
+      <div style={spinStyle} />
+    </div>
+  );
+
+  if (error) return (
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "100vh", background: "#f5f5f3", gap: 12 }}>
+      <div style={{ fontSize: 48 }}>{error === "expired" ? "⏰" : "🔗"}</div>
+      <div style={{ fontWeight: 600, fontSize: 18 }}>{error === "expired" ? "Dieser Link ist abgelaufen" : "Link nicht gefunden"}</div>
+      <div style={{ color: "#888", fontSize: 14 }}>Der Freigabe-Link ist ungültig oder wurde entfernt.</div>
+    </div>
+  );
+
+  const thumbSize = 220;
+
+  return (
+    <div data-theme="light" style={{ minHeight: "100vh", background: "#f5f5f3", fontFamily: "var(--font-sans, system-ui, sans-serif)" }}>
+      {/* Header */}
+      <div style={{ background: "#fff", borderBottom: "1px solid #e0e0e0", padding: "12px 32px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <div style={{ width: 28, height: 28, background: "#14120f", color: "#fff", borderRadius: 4, display: "inline-flex", alignItems: "center", justifyContent: "center", fontFamily: "monospace", fontWeight: 700, fontSize: 14 }}>p</div>
+          <div>
+            <div style={{ fontSize: 11, color: "#888", letterSpacing: "0.06em", textTransform: "uppercase" }}>picpop · Geteilte Sammlung</div>
+            <div style={{ fontWeight: 600, fontSize: 14 }}>{shareData?.label || "Freigegebene Inhalte"}</div>
+          </div>
+        </div>
+        <div style={{ fontSize: 12, color: "#888", display: "flex", alignItems: "center", gap: 16 }}>
+          <span>{assets.length} {assets.length === 1 ? "Datei" : "Dateien"}</span>
+          {shareData?.expires && <span>Gültig bis {shareData.expires}</span>}
+        </div>
+      </div>
+
+      {/* Grid */}
+      <div style={{ padding: 32 }}>
+        {assets.length === 0
+          ? <div style={{ textAlign: "center", color: "#888", padding: 64 }}>Keine Inhalte verfügbar</div>
+          : (
+            <div style={{ display: "grid", gridTemplateColumns: `repeat(auto-fill, minmax(${thumbSize}px, 1fr))`, gap: 12 }}>
+              {assets.map(a => (
+                <div key={a.id} onClick={() => setOpenA(a)} style={{ cursor: "pointer", borderRadius: 6, overflow: "hidden", background: "#e0e0e0", aspectRatio: a.ratio || "1", position: "relative" }}>
+                  {a.storageUrl
+                    ? <img src={a.storageUrl} alt={a.title} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+                    : <div style={{ width: "100%", height: "100%", background: "#d0d0d0" }} />}
+                </div>
+              ))}
+            </div>
+          )}
+      </div>
+
+      {/* Lightbox */}
+      {openA && (
+        <div onClick={() => setOpenA(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9999 }}>
+          <div onClick={e => e.stopPropagation()} style={{ maxWidth: "90vw", maxHeight: "90vh", position: "relative" }}>
+            <img src={openA.storageUrl} alt={openA.title} style={{ maxWidth: "90vw", maxHeight: "85vh", objectFit: "contain", display: "block", borderRadius: 4 }} />
+            <div style={{ color: "#fff", textAlign: "center", marginTop: 10, fontSize: 13 }}>{openA.title}</div>
+            <button onClick={() => setOpenA(null)} style={{ position: "absolute", top: -36, right: 0, background: "none", border: "none", color: "#fff", fontSize: 22, cursor: "pointer" }}>✕</button>
+            {shareData?.viewOnly !== true && (
+              <a href={openA.storageUrl} download target="_blank" rel="noopener noreferrer" style={{ display: "block", textAlign: "center", marginTop: 8, color: "#aaa", fontSize: 12 }}>⬇ Download</a>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── App ──────────────────────────────────────────────────────────────────────
 function App() {
   const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
@@ -1021,6 +1124,13 @@ function App() {
   }/*EDITMODE-END*/;
 
   const [tweaks, setTweak] = window.useTweaks(TWEAK_DEFAULTS);
+
+  // ── Public share page: /s/{slug} — no auth required ───────────────────────
+  const shareSlug = (() => {
+    const m = window.location.pathname.match(/^\/s\/([a-z0-9_-]+)$/i);
+    return m ? m[1] : null;
+  })();
+  if (shareSlug) return <PublicSharePage slug={shareSlug} />;
 
   // ── Auth gate ─────────────────────────────────────────────────────────────
   const { user, authReady, signOut } = window.useAuth();

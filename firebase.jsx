@@ -368,6 +368,22 @@ async function dbDeleteTagCollection(id) {
   await tenantCol("tagCollections").doc(id).delete();
 }
 
+// ── Share links (root collection — readable without auth for external recipients) ──
+async function dbCreateShareLink(slug, data) {
+  await db.collection("shareLinks").doc(slug).set({
+    ...data,
+    tenant: window.TENANT_ID,
+    createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+  });
+}
+async function dbGetShareLink(slug) {
+  const doc = await db.collection("shareLinks").doc(slug).get();
+  return doc.exists ? doc.data() : null;
+}
+async function dbDeleteShareLink(slug) {
+  await db.collection("shareLinks").doc(slug).delete();
+}
+
 // ── Write operations ──────────────────────────────────────────────────────────
 
 async function dbSaveAsset(asset) {
@@ -673,6 +689,9 @@ Object.assign(window, {
   subscribeToAssets,
   subscribeToActivity,
   subscribeToSharedLinks,
+  dbCreateShareLink,
+  dbGetShareLink,
+  dbDeleteShareLink,
   subscribeToTags,
   subscribeToTeam,
   subscribeToTagCollections,
