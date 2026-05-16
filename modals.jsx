@@ -632,8 +632,34 @@ function ShareDialog({ open, target, onClose, onShared, lang }) {
   }, [open, target]);
 
   if (!target) return null;
-  const label = target.folder ? target.folder.name : (target.asset?.title || "");
-  const count = target.folder ? (target.folder.count || 0) : 1;
+
+  // Resolve label and asset list from all target variants
+  const label = target.label || target.folder?.name || target.asset?.title || "";
+  const count = target.assets?.length ?? (target.folder ? (target.folder.count || 0) : 1);
+
+  // Slim asset snapshot to embed in Firestore (only fields needed for public display)
+  function assetSnapshot(a) {
+    return {
+      id: a.id || "",
+      title: a.title || "",
+      storageUrl: a.storageUrl || "",
+      ratio: a.ratio || 1,
+      kind: a.kind || "image",
+      format: a.format || "",
+      width: a.width || 0,
+      height: a.height || 0,
+    };
+  }
+  function resolveAssets() {
+    if (target.assets) return target.assets.map(assetSnapshot);
+    if (target.asset?.storageUrl) return [assetSnapshot(target.asset)];
+    if (target.folder) {
+      return (window.ASSETS || [])
+        .filter(a => a.folderId === target.folder.id)
+        .map(assetSnapshot);
+    }
+    return [];
+  }
 
   async function createAndCopy() {
     if (!saved) {
@@ -641,9 +667,9 @@ function ShareDialog({ open, target, onClose, onShared, lang }) {
       try {
         await window.dbCreateShareLink(slug, {
           id: slug,
-          folderId: target.folder?.id || null,
-          assetId: target.asset?.id || null,
           label,
+          assets: resolveAssets(),
+          folderId: target.folder?.id || null,
           viewOnly,
           expires,
           recipients,

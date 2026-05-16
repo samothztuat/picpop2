@@ -381,7 +381,7 @@ function RecentView({ onOpenFolder, onOpenAsset, onShareTarget, onDeleteAssets, 
             count={selection.size} onClear={clearSel} lang={lang} allFavorited={allFav}
             onFavorite={() => bulkSetFavorite(selArr, true)}
             onUnfavorite={() => bulkSetFavorite(selArr, false)}
-            onShare={() => onShareTarget?.({ asset: { title: `${selection.size} ${t("items")}`, format: "Auswahl", width: 0, height: 0 } })}
+            onShare={() => onShareTarget?.({ assets: selArr.map(id => allAssets.find(a => a.id === id)).filter(Boolean), label: `${selection.size} ${t("items")}` })}
             onApplyTag={(tagId) => { onBulkAddTag?.(selArr, tagId); }}
             onRemoveTag={(tagId) => { selArr.forEach(id => { const a = allAssets.find(x => x.id === id); if (a) window.updateAssetTags(id, a.tags.filter(t => t !== tagId)); }); }}
             selectedAssets={selArr.map(id => allAssets.find(a => a.id === id)).filter(Boolean)}
@@ -555,7 +555,7 @@ function FolderDetailView({ assets: assetsProp, folder, onBack, onOpenAsset, onO
           count={selection.size} onClear={clearSel} lang={lang} allFavorited={allFav}
           onFavorite={() => bulkSetFavorite(selArr, true)}
           onUnfavorite={() => bulkSetFavorite(selArr, false)}
-          onShare={() => onShareTarget({ asset: { title: `${selection.size} ${t("items")}`, format: "Auswahl", width: 0, height: 0 } })}
+          onShare={() => onShareTarget({ assets: selArr.map(id => allAssets.find(a => a.id === id)).filter(Boolean), label: `${selection.size} ${t("items")}` })}
           onApplyTag={(tagId) => { onBulkAddTag?.(selArr, tagId); }}
           onRemoveTag={(tagId) => { selArr.forEach(id => { const a = allAssets.find(x => x.id === id); if (a) window.updateAssetTags(id, a.tags.filter(t => t !== tagId)); }); }}
           selectedAssets={selArr.map(id => allAssets.find(a => a.id === id)).filter(Boolean)}
@@ -1174,7 +1174,7 @@ function RecentUploadsView({ assets: assetsProp, area, lang, query,
               count={selection.size} onClear={clearSel} lang={lang} allFavorited={selArr.length > 0 && selArr.every(id => favorites.has(id))}
               onFavorite={() => bulkSetFavorite(selArr, true)}
               onUnfavorite={() => bulkSetFavorite(selArr, false)}
-              onShare={() => onShareTarget({ asset: { title: `${selection.size} ${t("items")}`, format: "Auswahl", width: 0, height: 0 } })}
+              onShare={() => onShareTarget({ assets: selArr.map(id => assets.find(a => a.id === id)).filter(Boolean), label: `${selection.size} ${t("items")}` })}
               onApplyTag={(tagId) => { onBulkAddTag?.(selArr, tagId); }}
               onRemoveTag={(tagId) => { selArr.forEach(id => { const a = assets.find(x => x.id === id); if (a) window.updateAssetTags(id, a.tags.filter(t => t !== tagId)); }); }}
               selectedAssets={selArr.map(id => assets.find(a => a.id === id)).filter(Boolean)}
@@ -1473,7 +1473,7 @@ function AllAssetsView({ assets: assetsProp, area, lang, onOpenAsset, onShareTar
           count={selection.size} onClear={clearSel} lang={lang} allFavorited={allFav}
           onFavorite={() => bulkSetFavorite(selArr, true)}
           onUnfavorite={() => bulkSetFavorite(selArr, false)}
-          onShare={() => onShareTarget({ asset: { title: `${selection.size} ${t("items")}`, format: "Auswahl", width: 0, height: 0 } })}
+          onShare={() => onShareTarget({ assets: selArr.map(id => assets.find(a => a.id === id)).filter(Boolean), label: `${selection.size} ${t("items")}` })}
           onApplyTag={(tagId) => { onBulkAddTag?.(selArr, tagId); }}
           onRemoveTag={(tagId) => { selArr.forEach(id => { const a = assets.find(x => x.id === id); if (a) window.updateAssetTags(id, a.tags.filter(t => t !== tagId)); }); }}
           selectedAssets={selArr.map(id => assets.find(a => a.id === id)).filter(Boolean)}
@@ -1639,7 +1639,7 @@ function FavoritesView({ assets: assetsProp, area, lang, onOpenAsset, onOpenFold
         <window.BulkBar
           count={selection.size} onClear={() => setSelection(new Set())} lang={lang} allFavorited={true}
           onFavorite={() => {}} onUnfavorite={() => { bulkSetFavorite(selArr, false); clearSel(); }}
-          onShare={() => onShareTarget({ asset: { title: `${selection.size} ${t("items")}`, format: "Auswahl", width: 0, height: 0 } })}
+          onShare={() => onShareTarget({ assets: selArr.map(id => assets.find(a => a.id === id)).filter(Boolean), label: `${selection.size} ${t("items")}` })}
           onApplyTag={(tagId) => { onBulkAddTag?.(selArr, tagId); }}
           onRemoveTag={(tagId) => { selArr.forEach(id => { const a = assets.find(x => x.id === id); if (a) window.updateAssetTags(id, a.tags.filter(t => t !== tagId)); }); }}
           selectedAssets={selArr.map(id => assets.find(a => a.id === id)).filter(Boolean)}

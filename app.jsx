@@ -1021,26 +1021,14 @@ function PublicSharePage({ slug }) {
   const [openA, setOpenA] = useStateA(null);
 
   useEffectA(() => {
-    window.dbGetShareLink(slug).then(async data => {
+    window.dbGetShareLink(slug).then(data => {
       if (!data) { setError("not_found"); setLoading(false); return; }
-      // Check expiry
       if (data.expires && new Date(data.expires) < new Date()) {
         setError("expired"); setLoading(false); return;
       }
       setShareData(data);
-      // Load assets from Firestore for this tenant
-      try {
-        const db = firebase.firestore();
-        const col = db.collection("tenants").doc(data.tenant).collection("assets");
-        let snap;
-        if (data.folderId) {
-          snap = await col.where("folderId", "==", data.folderId).get();
-        } else if (data.assetId) {
-          snap = await col.doc(data.assetId).get();
-          snap = { docs: snap.exists ? [snap] : [] };
-        }
-        setAssets((snap?.docs || []).map(d => d.data()));
-      } catch (e) { console.error(e); }
+      // Assets are embedded directly in the shareLink doc — no auth needed
+      setAssets(Array.isArray(data.assets) ? data.assets : []);
       setLoading(false);
     }).catch(() => { setError("error"); setLoading(false); });
   }, [slug]);
