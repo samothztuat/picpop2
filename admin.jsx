@@ -85,6 +85,8 @@ function TenantDetail({ tenant, onRefresh }) {
   const [users,        setUsers]        = useStateAdm([]);
   const [loadingUsers, setLoadingUsers] = useStateAdm(true);
   const [showNewUser,  setShowNewUser]  = useStateAdm(false);
+  const [nuFirstName,  setNuFirstName]  = useStateAdm("");
+  const [nuLastName,   setNuLastName]   = useStateAdm("");
   const [nuEmail,      setNuEmail]      = useStateAdm("");
   const [nuPassword,   setNuPassword]   = useStateAdm("");
   const [nuCreating,   setNuCreating]   = useStateAdm(false);
@@ -119,13 +121,16 @@ function TenantDetail({ tenant, onRefresh }) {
     setNuCreating(true); setNuMsg(null);
     try {
       const { uid, email } = await adminCreateAuthUser(nuEmail.trim(), nuPassword);
+      const firstName = nuFirstName.trim();
+      const lastName  = nuLastName.trim();
+      const displayName = [firstName, lastName].filter(Boolean).join(" ") || email.split("@")[0];
       await window.db.collection("tenants").doc(tenant.id).collection("users").doc(uid).set({
-        uid, email, role: "editor",
+        uid, email, displayName, firstName, lastName, role: "editor",
         createdAt: firebase.firestore.FieldValue.serverTimestamp(),
       });
       await window.db.collection("userTenants").doc(uid).set({ tenantId: tenant.id, email });
-      setNuMsg({ ok: true, text: `✓ ${email} angelegt` });
-      setNuEmail(""); setNuPassword(""); setShowNewUser(false);
+      setNuMsg({ ok: true, text: `✓ ${displayName} (${email}) angelegt` });
+      setNuFirstName(""); setNuLastName(""); setNuEmail(""); setNuPassword(""); setShowNewUser(false);
       await loadUsers(); onRefresh();
     } catch (err) {
       setNuMsg({ ok: false, text: err.message });
@@ -266,6 +271,18 @@ function TenantDetail({ tenant, onRefresh }) {
       {/* New user form */}
       {showNewUser && (
         <form onSubmit={handleCreateUser} style={{ background: "var(--panel)", border: "1px solid var(--line-strong)", borderRadius: 4, padding: "14px 16px", marginBottom: 12, display: "flex", flexDirection: "column", gap: 10 }}>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+            <div style={{ flex: "1 1 140px" }}>
+              <div style={{ fontSize: 10, fontFamily: "var(--font-mono)", textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--muted)", marginBottom: 5 }}>Vorname</div>
+              <input type="text" value={nuFirstName} onChange={e => setNuFirstName(e.target.value)}
+                placeholder="Maria" autoComplete="off" style={{ ...inp, width: "100%" }} />
+            </div>
+            <div style={{ flex: "1 1 140px" }}>
+              <div style={{ fontSize: 10, fontFamily: "var(--font-mono)", textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--muted)", marginBottom: 5 }}>Nachname</div>
+              <input type="text" value={nuLastName} onChange={e => setNuLastName(e.target.value)}
+                placeholder="Mustermann" autoComplete="off" style={{ ...inp, width: "100%" }} />
+            </div>
+          </div>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
             <div style={{ flex: "1 1 200px" }}>
               <div style={{ fontSize: 10, fontFamily: "var(--font-mono)", textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--muted)", marginBottom: 5 }}>E-Mail</div>
