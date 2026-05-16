@@ -25,7 +25,7 @@ async function fetchAndDownload(a) {
   if (!url) return;
   const fname = assetFilename(a);
   try {
-    const resp = await fetch(url);
+    const resp = await fetch(url, { mode: "cors" });
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const raw = await resp.blob();
     // Force octet-stream so the browser never tries to display it inline
@@ -36,34 +36,12 @@ async function fetchAndDownload(a) {
     document.body.appendChild(el); el.click(); document.body.removeChild(el);
     setTimeout(() => URL.revokeObjectURL(objUrl), 10000);
   } catch(err) {
-    console.warn("[picpop] fetch download failed:", err.message || err);
-    // Last-resort: if fetch or blob URL fails, try canvas for images
-    if (a.kind !== "pdf") {
-      try {
-        await new Promise((resolve, reject) => {
-          const img = new Image();
-          img.crossOrigin = "anonymous";
-          img.onload = () => {
-            const cv = document.createElement("canvas");
-            cv.width = img.naturalWidth; cv.height = img.naturalHeight;
-            cv.getContext("2d").drawImage(img, 0, 0);
-            cv.toBlob(b => {
-              if (!b) { reject(new Error("toBlob null")); return; }
-              const objUrl = URL.createObjectURL(b);
-              const el = document.createElement("a");
-              el.href = objUrl; el.download = fname;
-              document.body.appendChild(el); el.click(); document.body.removeChild(el);
-              setTimeout(() => URL.revokeObjectURL(objUrl), 10000);
-              resolve();
-            }, "image/jpeg", 0.95);
-          };
-          img.onerror = reject;
-          img.src = url;
-        });
-        return;
-      } catch(_) {}
-    }
-    window.open(url, "_blank");
+    console.warn("[picpop] fetch download failed, using direct link:", err.message || err);
+    // Fallback: create a hidden <a download> pointing directly at the URL
+    // Works when CORS allows it; the browser will download instead of navigate
+    const el = document.createElement("a");
+    el.href = url; el.download = fname; el.target = "_blank";
+    document.body.appendChild(el); el.click(); document.body.removeChild(el);
   }
 }
 

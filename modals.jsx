@@ -176,13 +176,12 @@ function AssetDetailModal({ open, asset: assetProp, peerAssets, onNavigate, onCl
     setShowTagPicker(false);
   }
 
-  // Blob-based download — fetches as blob first to avoid cross-origin new-tab
+  // Blob-based download — fetches as blob first to force Save dialog
   async function nativeDownload(url, fname) {
     try {
-      const resp = await fetch(url);
+      const resp = await fetch(url, { mode: "cors" });
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const raw = await resp.blob();
-      // Force octet-stream so the browser never tries to display it inline
       const blob = new Blob([raw], { type: "application/octet-stream" });
       const objUrl = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -190,8 +189,10 @@ function AssetDetailModal({ open, asset: assetProp, peerAssets, onNavigate, onCl
       document.body.appendChild(a); a.click(); document.body.removeChild(a);
       setTimeout(() => URL.revokeObjectURL(objUrl), 10000);
     } catch(err) {
-      console.warn("[picpop] blob download failed, fallback:", err);
-      window.open(url, "_blank");
+      console.warn("[picpop] blob download failed, using direct link:", err);
+      const a = document.createElement("a");
+      a.href = url; a.download = fname; a.target = "_blank";
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
     }
   }
 
