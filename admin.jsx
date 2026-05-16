@@ -140,9 +140,18 @@ function TenantDetail({ tenant, onRefresh }) {
   }
 
   async function handleRemoveUser(u) {
-    if (!window.confirm(`Nutzer ${u.email} wirklich aus diesem Workspace entfernen?\n\nDer Firebase Auth Account bleibt bestehen.`)) return;
+    if (!window.confirm(`Nutzer ${u.displayName || u.email} wirklich löschen?\n\nDer Firebase-Auth-Account wird dauerhaft entfernt und die E-Mail-Adresse wieder freigegeben.`)) return;
     setDeletingUid(u.uid);
     try {
+      // 1. Auth-Account dauerhaft löschen (E-Mail wird wieder freigegeben)
+      const deleteAuthUser = window._picpopFunctions.httpsCallable("adminDeleteUser");
+      await deleteAuthUser({ uid: u.uid });
+    } catch (err) {
+      console.warn("Auth-Löschung fehlgeschlagen:", err.message);
+      // Trotzdem Firestore-Einträge entfernen
+    }
+    try {
+      // 2. Firestore-Einträge löschen
       await window.db.collection("tenants").doc(tenant.id).collection("users").doc(u.uid).delete();
       await window.db.collection("userTenants").doc(u.uid).delete().catch(() => {});
       await loadUsers(); onRefresh();

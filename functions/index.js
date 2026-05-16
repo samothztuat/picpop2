@@ -28,3 +28,22 @@ exports.adminSetPassword = onCall({ region: "europe-west1" }, async (request) =>
   await getAuth().updateUser(uid, { password: newPassword });
   return { success: true };
 });
+
+// Löscht einen Firebase-Auth-Account dauerhaft — E-Mail wird wieder freigegeben.
+// Darf nur vom Superadmin aufgerufen werden.
+exports.adminDeleteUser = onCall({ region: "europe-west1" }, async (request) => {
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "Nicht angemeldet.");
+  }
+  if (request.auth.token.email !== SUPERADMIN_EMAIL) {
+    throw new HttpsError("permission-denied", "Nur für Superadmin.");
+  }
+
+  const { uid } = request.data;
+  if (!uid || typeof uid !== "string") {
+    throw new HttpsError("invalid-argument", "uid fehlt.");
+  }
+
+  await getAuth().deleteUser(uid);
+  return { success: true };
+});
