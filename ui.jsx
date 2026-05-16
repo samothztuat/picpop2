@@ -227,31 +227,15 @@ function PH({ hue = 25, label = "image", style, ratio, className = "" }) {
   return <div className={"ph " + className} style={s} data-label={label} />;
 }
 function PHDark({ hue = 25, label = "image", style }) {
-  // PDF / print placeholder — paper white, no colour tint
+  // Simple gray placeholder — no decorative skeleton
   return (
-    <div className="ph" style={{
-      "--ph-1": "#efefed",
-      "--ph-2": "#e6e6e4",
+    <div style={{
       width: "100%",
       height: "100%",
+      background: "var(--line)",
+      borderRadius: "var(--radius)",
       ...style,
-    }} data-label={label}>
-      <div style={{ position: "absolute", inset: "8% 10% auto 10%", height: "6%", background: "var(--line-strong)", borderRadius: 1 }} />
-      <div style={{ position: "absolute", inset: "20% 10% 60% 10%", display: "grid", gap: "2%", gridTemplateColumns: "1fr 1fr" }}>
-        <div style={{ background: "var(--line)", borderRadius: 2 }} />
-        <div style={{ display: "grid", gap: "8%" }}>
-          <div style={{ background: "rgba(0,0,0,0.08)", height: "20%" }} />
-          <div style={{ background: "rgba(0,0,0,0.06)", height: "12%", width: "80%" }} />
-          <div style={{ background: "rgba(0,0,0,0.06)", height: "12%", width: "60%" }} />
-          <div style={{ background: "rgba(0,0,0,0.06)", height: "12%", width: "70%" }} />
-        </div>
-      </div>
-      <div style={{ position: "absolute", left: "10%", right: "10%", bottom: "12%", display: "grid", gap: "1.5%" }}>
-        {[1,2,3,4,5].map(i => (
-          <div key={i} style={{ height: "5%", width: (90 - i*8) + "%", background: "rgba(0,0,0,0.06)" }} />
-        ))}
-      </div>
-    </div>
+    }} />
   );
 }
 
