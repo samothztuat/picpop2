@@ -815,17 +815,26 @@ function Topbar({ lang, setLang, theme, setTheme, query, setQuery,
       </div>
 
       {/* Filter toggle */}
-      <button
-        onClick={() => setFilterOpen(v => !v)}
-        style={{ all: "unset", cursor: "pointer", height: 32, padding: "0 10px", display: "flex", alignItems: "center", gap: 6, borderRadius: 4, border: `1px solid ${filterOpen || activeCount > 0 ? "var(--fg)" : "var(--line-strong)"}`, background: activeCount > 0 ? "var(--fg)" : "var(--panel)", color: activeCount > 0 ? "var(--bg)" : "var(--fg-2)", fontSize: 12, fontWeight: 500, transition: "all .15s" }}
-        title={lang === "de" ? "Filter" : "Filters"}
-      >
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/>
-        </svg>
-        {lang === "de" ? "Filter" : "Filters"}
-        {activeCount > 0 && <span style={{ background: "var(--bg)", color: "var(--fg)", borderRadius: 10, padding: "0 5px", fontSize: 10, fontFamily: "var(--font-mono)" }}>{activeCount}</span>}
-      </button>
+      <div style={{ display: "flex", alignItems: "center", gap: 0 }}>
+        <button
+          onClick={() => setFilterOpen(v => !v)}
+          style={{ all: "unset", cursor: "pointer", height: 32, padding: "0 10px", display: "flex", alignItems: "center", gap: 6, borderRadius: activeCount > 0 ? "4px 0 0 4px" : 4, border: `1px solid ${filterOpen || activeCount > 0 ? "var(--fg)" : "var(--line-strong)"}`, borderRight: activeCount > 0 ? "none" : undefined, background: activeCount > 0 ? "var(--fg)" : "var(--panel)", color: activeCount > 0 ? "var(--bg)" : "var(--fg-2)", fontSize: 12, fontWeight: 500, transition: "all .15s" }}
+          title={lang === "de" ? "Filter" : "Filters"}
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/>
+          </svg>
+          {lang === "de" ? "Filter" : "Filters"}
+          {activeCount > 0 && <span style={{ background: "var(--bg)", color: "var(--fg)", borderRadius: 10, padding: "0 5px", fontSize: 10, fontFamily: "var(--font-mono)" }}>{activeCount}</span>}
+        </button>
+        {activeCount > 0 && (
+          <button
+            onClick={() => { onClearFilters(); setFilterOpen(false); }}
+            title={lang === "de" ? "Filter zurücksetzen" : "Clear filters"}
+            style={{ all: "unset", cursor: "pointer", height: 32, width: 28, display: "flex", alignItems: "center", justifyContent: "center", borderRadius: "0 4px 4px 0", border: "1px solid var(--fg)", borderLeft: "1px solid rgba(255,255,255,0.25)", background: "var(--fg)", color: "var(--bg)", fontSize: 14, lineHeight: 1, transition: "all .15s" }}
+          >×</button>
+        )}
+      </div>
 
       <div style={{ flex: 1 }} />
       <div className="row" style={{ gap: 6 }}>
