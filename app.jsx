@@ -1071,21 +1071,46 @@ function App() {
   // Opens an asset and captures the visible peer list for prev/next navigation
   function openAssetWith(a, peers) { setOpenAsset(a); setOpenPeers(peers || null); }
 
-  // Pinch-to-zoom on trackpad: wheel + ctrlKey = pinch gesture on macOS.
+  // Zoom: Trackpad-Pinch (Ctrl+Wheel), Mausrad (Ctrl+Wheel) und Tastatur (Ctrl+Plus/Minus/0).
+  // Gilt für images UND print — contentRef wraps die gemeinsame .content.scroll-Box.
   // Must listen on document with passive:false — child listeners get it too late for preventDefault.
   const contentRef = useRefA(null);
   useEffectA(() => {
+    function getThumb() { return parseInt(localStorage.getItem("picpop.thumbSize") || "220", 10); }
+
     function onWheel(e) {
       if (!e.ctrlKey) return;                        // regular scroll — ignore
       const el = contentRef.current;
       if (!el || !el.contains(e.target)) return;    // pointer not over grid area
       if (openAsset) return;                         // detail modal open — don't interfere
       e.preventDefault();                            // stop browser page-zoom
-      const current = parseInt(localStorage.getItem("picpop.thumbSize") || "220", 10);
-      window.setGlobalThumbSize(current - e.deltaY * 1.5);
+      window.setGlobalThumbSize(getThumb() - e.deltaY * 1.5);
     }
+
+    function onKeyDown(e) {
+      if (!e.ctrlKey && !e.metaKey) return;         // only Ctrl / Cmd combos
+      if (openAsset) return;                         // modal open — leave alone
+      const el = contentRef.current;
+      if (!el) return;
+      const k = e.key;
+      if (k === "+" || k === "=" || k === "ArrowUp") {
+        e.preventDefault();
+        window.setGlobalThumbSize(getThumb() + 30);
+      } else if (k === "-" || k === "ArrowDown") {
+        e.preventDefault();
+        window.setGlobalThumbSize(getThumb() - 30);
+      } else if (k === "0") {
+        e.preventDefault();
+        window.setGlobalThumbSize(220);              // reset to default
+      }
+    }
+
     document.addEventListener("wheel", onWheel, { passive: false });
-    return () => document.removeEventListener("wheel", onWheel);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("wheel", onWheel);
+      document.removeEventListener("keydown", onKeyDown);
+    };
   }, [openAsset]);
   const [devOpen, setDevOpen] = useStateA(false);
   const [shareTarget, setShareTarget] = useStateA(null);
