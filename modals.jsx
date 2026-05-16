@@ -626,7 +626,10 @@ function ShareDialog({ open, target, onClose, onShared, lang }) {
     if (!open || !target) return;
     const s = (target.folder ? "f-" : "a-") + Math.random().toString(36).slice(2, 9);
     setSlug(s);
-    setLink(`${window.location.origin}/s/${s}`);
+    const base = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
+      ? "https://picpop-bilddatenbank.web.app"
+      : window.location.origin;
+    setLink(`${base}/s/${s}`);
     setCopied(false);
     setSaved(false);
   }, [open, target]);
