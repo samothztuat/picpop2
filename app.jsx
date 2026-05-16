@@ -109,7 +109,7 @@ function FolderRow({ folder, active, onOpen, onRename, onDelete, onPin, onMoveAs
       {folder.pinned && (
         <window.Icon.pin size={11} style={{ color: "var(--accent)", flexShrink: 0, opacity: 0.8 }} />
       )}
-      <span className="count num" style={{ marginRight: 4 }}>{liveCount ?? folder.count}</span>
+      <span className="count num">{liveCount ?? folder.count}</span>
       <button className="folder-more" onClick={(e) => { e.stopPropagation(); setMenu(v => !v); setConfirmDel(false); }} aria-label="more">
         <window.Icon.more size={12} />
       </button>
