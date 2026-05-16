@@ -804,7 +804,9 @@ function Topbar({ lang, setLang, theme, setTheme, query, setQuery,
   }
 
   return (
-    <header className="topbar" style={{ position: "relative", overflow: "visible" }}>
+    <header className="topbar" style={{ flexDirection: "column", alignItems: "stretch", padding: 0, height: "auto" }}>
+      {/* Toolbar row */}
+      <div style={{ display: "flex", alignItems: "center", gap: 16, padding: "0 24px", height: 56, flexShrink: 0 }}>
       {/* Search */}
       <div className="input ghost" style={{ flex: 1, maxWidth: 600 }}>
         <window.Icon.search size={14} />
@@ -846,10 +848,11 @@ function Topbar({ lang, setLang, theme, setTheme, query, setQuery,
         </button>
         <button className="btn icon sm" title="Notifications"><window.Icon.inbox size={14} /></button>
       </div>
+      </div>
 
-      {/* Filter dropdown panel */}
+      {/* Filter panel — in normal flow, pushes content down */}
       {filterOpen && (
-        <div ref={panelRef} style={{ position: "absolute", top: "calc(100% + 1px)", left: 0, right: 0, zIndex: 50, background: "var(--panel)", borderBottom: "1px solid var(--line)", boxShadow: "0 8px 24px -8px rgba(0,0,0,0.18)", padding: "4px 24px 12px" }}>
+        <div ref={panelRef} style={{ borderTop: "1px solid var(--line)", background: "var(--panel)", padding: "4px 24px 12px" }}>
           {availableYears.length > 0 && (
             <FilterRow label={lang === "de" ? "Jahr" : "Year"}>
               <Chip active={filterYear === null} onClick={() => { setFilterYear(null); setFilterMonth(null); }}>{lang === "de" ? "Alle" : "All"}</Chip>
