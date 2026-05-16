@@ -770,13 +770,19 @@ function Topbar({ lang, setLang, theme, setTheme, query, setQuery,
   const [saveCollName, setSaveCollName] = useStateA("");
   const { useState: useStateT, useMemo: useMemoT, useEffect: useEffectT, useRef: useRefT } = React;
   const panelRef = useRefT(null);
+  const filterBtnRef = useRefT(null);
 
   const activeCount = (filterYear !== null ? 1 : 0) + (filterMonth !== null ? 1 : 0) + filterTags.length + (filterAuthor !== null ? 1 : 0);
 
-  // Close on outside click
+  // Close on outside click — but NOT when clicking the toggle button itself
+  // (the button's own onClick handles open/close; catching it here would fight with it)
   useEffectT(() => {
     if (!filterOpen) return;
-    function onDown(e) { if (panelRef.current && !panelRef.current.contains(e.target)) setFilterOpen(false); }
+    function onDown(e) {
+      if (panelRef.current && panelRef.current.contains(e.target)) return;
+      if (filterBtnRef.current && filterBtnRef.current.contains(e.target)) return;
+      setFilterOpen(false);
+    }
     document.addEventListener("mousedown", onDown);
     return () => document.removeEventListener("mousedown", onDown);
   }, [filterOpen]);
@@ -856,6 +862,7 @@ function Topbar({ lang, setLang, theme, setTheme, query, setQuery,
       {/* Filter toggle */}
       <div style={{ display: "flex", alignItems: "center", gap: 0 }}>
         <button
+          ref={filterBtnRef}
           onClick={() => setFilterOpen(v => !v)}
           style={{ all: "unset", cursor: "pointer", height: 32, padding: "0 10px", display: "flex", alignItems: "center", gap: 6, borderRadius: activeCount > 0 ? "4px 0 0 4px" : 4, border: `1px solid ${filterOpen || activeCount > 0 ? "var(--fg)" : "var(--line-strong)"}`, borderRight: activeCount > 0 ? "none" : undefined, background: activeCount > 0 ? "var(--fg)" : "var(--panel)", color: activeCount > 0 ? "var(--bg)" : "var(--fg-2)", fontSize: 12, fontWeight: 500, transition: "all .15s" }}
           title={lang === "de" ? "Filter" : "Filters"}
