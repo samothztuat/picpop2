@@ -285,14 +285,14 @@ function KiBatchTab() {
 
   // Wählt die richtige Analysefunktion je nach Asset-Typ und Bereich
   function pickFn(asset) {
-    if (asset.kind === 'pdf')                        return window.describePdfWithAI;
-    if (asset.area === 'print' || asset.kind !== 'image') return window.describePrintImageWithAI;
-    return window.describeImageWithAI;
+    if (asset.kind === 'pdf')   return window.describePdfWithAI;
+    if (asset.area === 'print') return window.describePrintImageWithAI;
+    return window.describeImageWithAI;  // Fotos + Legacy ohne kind
   }
 
   function typeLabel(asset) {
-    if (asset.kind === 'pdf')   return '[PDF Text]';
-    if (asset.area === 'print') return '[Print Bild]';
+    if (asset.kind === 'pdf')   return '[PDF]';
+    if (asset.area === 'print') return '[Print]';
     return '[Foto]';
   }
 
@@ -305,33 +305,36 @@ function KiBatchTab() {
 
     try {
       // 1. AI-Config laden
-      if (!window.AI_CONFIG?.openaiKey) await window.loadAiConfig();
+      await window.loadAiConfig();
       if (!window.AI_CONFIG?.openaiKey) {
         addLog('⚠ Kein OpenAI-Key — bitte in den Einstellungen hinterlegen.', 'error');
         setStatus('error'); return;
       }
 
-      // 2. Assets laden
+      // Bei "Alle neu analysieren" neuen Default-Prompt für Fotos verwenden
+      if (forceOverwrite && window.AI_DEFAULT_PROMPT) {
+        window.AI_CONFIG.prompt = window.AI_DEFAULT_PROMPT;
+        addLog('ℹ Verwende neuen Default-Prompt (mit fotografischen Stichpunkten).', 'info');
+      }
+
+      // 2. ALLE Assets laden (eine einzige Query — erfasst auch Assets ohne kind-Feld)
       addLog(forceOverwrite ? 'Lade alle Assets (Überschreiben aktiv)…' : 'Lade Assets ohne KI-Beschreibung…');
-      const [snapPdf, snapImg] = await Promise.all([
-        window.tenantCol('assets').where('kind', '==', 'pdf').get(),
-        window.tenantCol('assets').where('kind', '==', 'image').get(),
-      ]);
+      const snapAll = await window.tenantCol('assets').get();
+      const allAssets = snapAll.docs.map(d => d.data());
 
-      const todo = [
-        ...snapPdf.docs.map(d => d.data()),
-        ...snapImg.docs.map(d => d.data()),
-      ].filter(a => (forceOverwrite || !a.aiDescription) && a.storageUrl);
+      const todo = allAssets
+        .filter(a => (forceOverwrite || !a.aiDescription) && a.storageUrl)
+        .filter(a => a.kind === 'pdf' || a.kind === 'image' || !a.kind); // PDFs, Bilder, und Legacy-Assets ohne kind
 
-      // Sortierung: PDFs zuerst, dann Print-Bilder, dann reguläre Bilder
+      // Sortierung: PDFs zuerst, dann Print-Bilder, dann reguläre Fotos
       todo.sort((a, b) => {
         const rank = x => x.kind === 'pdf' ? 0 : x.area === 'print' ? 1 : 2;
         return rank(a) - rank(b);
       });
 
       const pdfs   = todo.filter(a => a.kind === 'pdf').length;
-      const prints = todo.filter(a => a.kind === 'image' && a.area === 'print').length;
-      const photos = todo.filter(a => a.kind === 'image' && a.area !== 'print').length;
+      const prints = todo.filter(a => a.area === 'print' && a.kind !== 'pdf').length;
+      const photos = todo.filter(a => a.area !== 'print' && a.kind !== 'pdf').length;
 
       addLog(`${todo.length} Assets ${forceOverwrite ? 'gesamt' : 'ohne KI-Beschreibung'}: ${pdfs} PDFs · ${prints} Print-Bilder · ${photos} Fotos`);
       setProgress({ done: 0, total: todo.length, errors: 0 });
