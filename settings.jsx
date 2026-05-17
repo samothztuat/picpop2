@@ -14,7 +14,7 @@ const FB_CFG = {
 };
 
 /* ── Default AI prompt for image analysis ── */
-const DEFAULT_AI_PROMPT = `Liste die wichtigsten Bildinhalte als kommagetrennte Stichwörter auf Deutsch. Erfasse alle relevanten Aspekte: Hauptmotiv, Personen (Anzahl, Geschlecht, Alter falls erkennbar), Objekte, Ort/Setting, Farben, Stimmung, Aktivitäten, Markennamen oder Texte falls sichtbar. Maximal 20 Begriffe. Ausgabe: ausschließlich die kommagetrennte Stichwortliste — kein Satz, kein Präambel, kein Punkt am Ende.`;
+const DEFAULT_AI_PROMPT = `Liste die wichtigsten Bildinhalte als kommagetrennte Stichwörter auf Deutsch. Erfasse alle relevanten Aspekte: Hauptmotiv, Personen (Anzahl, Geschlecht, Alter falls erkennbar), Objekte, Ort/Setting, Farben, Stimmung, Aktivitäten, Markennamen oder Texte falls sichtbar. Ergänze außerdem fotografische Stichpunkte zur Bildsprache — z. B. Bildausschnitt (Close-up, Nahaufnahme, Halbnahaufnahme, Halbtotale, Totale, Weitwinkel), Perspektive (Augenhöhe, Vogelperspektive, Froschperspektive), Tiefenschärfe (Bokeh, Schärfentiefe) oder besondere Lichtführung (Gegenlicht, Studioaufnahme, natürliches Licht). Maximal 25 Begriffe gesamt. Ausgabe: ausschließlich die kommagetrennte Stichwortliste — kein Satz, kein Präambel, kein Punkt am Ende.`;
 window.AI_DEFAULT_PROMPT = DEFAULT_AI_PROMPT;
 
 /* ── LLM providers picpop uses ── */
