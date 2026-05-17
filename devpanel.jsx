@@ -273,6 +273,7 @@ function KiBatchTab() {
   const [status, setStatus]     = useStateKI('idle'); // idle | running | done | error
   const [log, setLog]           = useStateKI([]);
   const [progress, setProgress] = useStateKI({ done: 0, total: 0, errors: 0 });
+  const [overwrite, setOverwrite] = useStateKI(false);
   const stopRef                 = useRefKI(false);
   const logRef                  = useRefKI(null);
 
@@ -295,7 +296,7 @@ function KiBatchTab() {
     return '[Foto]';
   }
 
-  async function runBatch() {
+  async function runBatch(forceOverwrite = false) {
     if (status === 'running') { stopRef.current = true; return; }
     stopRef.current = false;
     setLog([]);
@@ -310,8 +311,8 @@ function KiBatchTab() {
         setStatus('error'); return;
       }
 
-      // 2. Alle Assets ohne aiDescription aus Firestore laden (drei Queries, da Firestore kein OR unterstützt)
-      addLog('Lade Assets ohne KI-Beschreibung…');
+      // 2. Assets laden
+      addLog(forceOverwrite ? 'Lade alle Assets (Überschreiben aktiv)…' : 'Lade Assets ohne KI-Beschreibung…');
       const [snapPdf, snapImg] = await Promise.all([
         window.tenantCol('assets').where('kind', '==', 'pdf').get(),
         window.tenantCol('assets').where('kind', '==', 'image').get(),
@@ -320,7 +321,7 @@ function KiBatchTab() {
       const todo = [
         ...snapPdf.docs.map(d => d.data()),
         ...snapImg.docs.map(d => d.data()),
-      ].filter(a => !a.aiDescription && a.storageUrl);
+      ].filter(a => (forceOverwrite || !a.aiDescription) && a.storageUrl);
 
       // Sortierung: PDFs zuerst, dann Print-Bilder, dann reguläre Bilder
       todo.sort((a, b) => {
@@ -332,11 +333,11 @@ function KiBatchTab() {
       const prints = todo.filter(a => a.kind === 'image' && a.area === 'print').length;
       const photos = todo.filter(a => a.kind === 'image' && a.area !== 'print').length;
 
-      addLog(`${todo.length} Assets ohne KI-Beschreibung: ${pdfs} PDFs · ${prints} Print-Bilder · ${photos} Fotos`);
+      addLog(`${todo.length} Assets ${forceOverwrite ? 'gesamt' : 'ohne KI-Beschreibung'}: ${pdfs} PDFs · ${prints} Print-Bilder · ${photos} Fotos`);
       setProgress({ done: 0, total: todo.length, errors: 0 });
 
       if (todo.length === 0) {
-        addLog('✓ Alle Assets haben bereits eine KI-Beschreibung.', 'success');
+        addLog('✓ Keine passenden Assets gefunden.', 'success');
         setStatus('done'); return;
       }
 
@@ -381,21 +382,30 @@ function KiBatchTab() {
       <div>
         <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 4 }}>KI-Beschreibungen generieren</div>
         <div style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.7 }}>
-          Nur Assets <em>ohne</em> vorhandene KI-Beschreibung werden verarbeitet.<br/>
           <strong>PDFs</strong> — PDF.js extrahiert Text (S. 1–3), GPT liest Headlines/Begriffe<br/>
           <strong>Print-Bilder</strong> — Vision-API mit OCR-Fokus: Texte, Slogans, Kampagnentitel<br/>
-          <strong>Fotos</strong> — Vision-API mit Bildbeschreibungs-Prompt
+          <strong>Fotos</strong> — Vision-API: Bildbeschreibung + fotografische Stichpunkte
         </div>
       </div>
 
-      <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
         <button
           className={'btn' + (status === 'running' ? ' ghost' : ' primary')}
-          onClick={runBatch}
-          style={{ minWidth: 140 }}
+          onClick={() => status === 'running' ? runBatch() : runBatch(false)}
+          style={{ minWidth: 160 }}
         >
-          {status === 'running' ? '⏹ Stoppen' : '▶ Batch starten'}
+          {status === 'running' ? '⏹ Stoppen' : '▶ Fehlende analysieren'}
         </button>
+        {status !== 'running' && (
+          <button
+            className="btn"
+            onClick={() => runBatch(true)}
+            style={{ minWidth: 160 }}
+            title="Überschreibt vorhandene KI-Beschreibungen"
+          >
+            ↺ Alle neu analysieren
+          </button>
+        )}
         {progress.total > 0 && (
           <span style={{ fontSize: 12, color: 'var(--muted)', fontFamily: 'var(--font-mono)' }}>
             {progress.done} / {progress.total} ({pct}%) · {progress.errors} Fehler
