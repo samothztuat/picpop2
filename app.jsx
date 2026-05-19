@@ -1171,6 +1171,15 @@ function App() {
   const hasFilter = filterYear !== null || filterMonth !== null || filterTags.length > 0 || filterAuthor !== null;
   function clearFilters() { setFilterYear(null); setFilterMonth(null); setFilterTags([]); setFilterAuthor(null); setActiveTagColId(null); }
 
+  // Navigationsklick → aktive Tagsammlung zurücksetzen
+  const activeTagColIdRef = useRefA(null);
+  activeTagColIdRef.current = activeTagColId;
+  const navResetDone = useRefA(false);
+  useEffectA(() => {
+    if (!navResetDone.current) { navResetDone.current = true; return; } // initial mount überspringen
+    if (activeTagColIdRef.current) clearFilters();
+  }, [route, area]);
+
   const [openAsset, setOpenAsset] = useStateA(null);
   const [openPeers, setOpenPeers] = useStateA(null);
   // Opens an asset and captures the visible peer list for prev/next navigation
