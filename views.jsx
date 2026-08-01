@@ -14,6 +14,30 @@ const inPrint = a => {
   return false;
 };
 
+// ---- Mehrbegriff-Suche ----
+// Zerlegt die Sucheingabe in einzelne Begriffe (Trenner: Leerzeichen UND/ODER Komma).
+// Beispiel: "Mensch Rot" oder "Mensch, Rot" → ["mensch", "rot"].
+function parseSearchTerms(query) {
+  return (query || "").toLowerCase().split(/[\s,]+/).map(s => s.trim()).filter(Boolean);
+}
+// Prüft, ob ein Asset ALLE Suchbegriffe erfüllt (UND-Verknüpfung).
+// Jeder Begriff muss in irgendeinem durchsuchbaren Feld vorkommen:
+// Titel, Autor, Notizen, KI-Beschreibung, Foto-Attribute, Ordnername, Tag-Namen (de+en).
+function assetMatchesQuery(a, query, folderName) {
+  const terms = parseSearchTerms(query);
+  if (terms.length === 0) return true;
+  const tagNames = (window.effectiveTags?.(a) || a.tags || []).map(tid => {
+    const tg = window.tagById?.(tid);
+    return tg ? `${tg.name || ""} ${tg.name_en || ""}` : "";
+  });
+  const hay = [
+    a.title || "", a.author || "", a.notes || "", a.aiDescription || "",
+    folderName || "", ...(a.photoAttrs || []), ...tagNames,
+  ].join(" \n ").toLowerCase();
+  return terms.every(term => hay.includes(term));
+}
+window.assetMatchesQuery = assetMatchesQuery;
+
 // ---- Download helpers ----
 function assetFilename(a) {
   const ext = a.kind === "pdf" ? "pdf" : (a.format || "jpg").toLowerCase().replace("jpeg", "jpg");
@@ -328,10 +352,10 @@ function RecentView({ onOpenFolder, onOpenAsset, onShareTarget, onDeleteAssets, 
           <div className="eyebrow">picpop · {isPdf ? "Print" : (lang === "de" ? "Übersicht" : "Overview")}</div>
           <div className="h-display" style={{ marginTop: 8 }}>
             {(() => {
-              const name = currentUser?.displayName || currentUser?.email?.split("@")[0] || "";
+              const name = currentUser?.firstName || currentUser?.displayName?.split(" ")[0] || currentUser?.email?.split("@")[0] || "";
               const h = new Date().getHours();
-              const gr = h < 11 ? "Moin" : h < 14 ? "Mahlzeit" : h < 18 ? "Moin" : "Guten Abend";
-              return name ? `${gr}, ${name.split(" ")[0]}` : gr;
+              const gr = h < 18 ? "Moin" : "Guten Abend";
+              return name ? `${gr}, ${name}` : gr;
             })()}
           </div>
           <div style={{ marginTop: 14, maxWidth: 480 }}>
@@ -448,7 +472,7 @@ function FolderDetailView({ assets: assetsProp, folder, onBack, onOpenAsset, onO
     let xs = allAssets.filter(a => a.folderId === folder.id);
     // "Nicht zugeordnet" only lists truly tag-free assets
     if (isUnsorted) xs = xs.filter(a => (a.tags || []).length === 0);
-    if (q) xs = xs.filter(a => { const lq = q.toLowerCase(); return a.title.toLowerCase().includes(lq) || a.author.toLowerCase().includes(lq) || (a.notes||"").toLowerCase().includes(lq) || (a.aiDescription||"").toLowerCase().includes(lq); });
+    if (q) xs = xs.filter(a => assetMatchesQuery(a, q, folder?.name));
     if (filterTags.size > 0) xs = xs.filter(a => [...filterTags].every(tid => a.tags.includes(tid)));
     if (filterAuthor) xs = xs.filter(a => a.author === filterAuthor);
     if (sort === "date") xs = [...xs].sort((a,b) => (a.date < b.date ? 1 : -1));
@@ -876,7 +900,7 @@ function TagsView({ assets: assetsProp, tags: tagsProp, onSaveTag, onDeleteTag, 
 }
 
 // -------- Shared Links view --------
-function SharedView({ onOpenShare, lang }) {
+function SharedView({ onOpenShare, onReopen, lang }) {
   const t = window.makeT(lang);
   return (
     <div style={{ padding: "32px 32px 64px" }}>
@@ -892,31 +916,57 @@ function SharedView({ onOpenShare, lang }) {
           <div style={{ width: 160 }} className="eyebrow">{lang === "de" ? "Geteilt von" : "Shared by"}</div>
           <div style={{ width: 120 }} className="eyebrow">{lang === "de" ? "Erstellt" : "Created"}</div>
           <div style={{ width: 120 }} className="eyebrow">{t("expires")}</div>
-          <div style={{ width: 80, textAlign: "right" }} className="eyebrow">Views</div>
+          <div style={{ width: 80, textAlign: "right" }} className="eyebrow">Link</div>
           <div style={{ width: 40 }} />
         </div>
+        {window.SHARED_LINKS.length === 0 && (
+          <div style={{ padding: "32px 20px", textAlign: "center", color: "var(--muted)", fontSize: 13 }}>
+            {lang === "de"
+              ? "Noch keine Links geteilt. Teile einen Ordner oder ein Bild über das Teilen-Symbol."
+              : "No links shared yet. Share a folder or image via the share icon."}
+          </div>
+        )}
         {window.SHARED_LINKS.map(sl => {
-          const target = sl.folder ? window.folderById(sl.folder) : null;
-          const user = window.userById(sl.by);
+          const folder = sl.folderId ? window.folderById?.(sl.folderId) : null;
+          const user = window.userById?.(sl.by);
+          const byName = user?.name || sl.byName || (lang === "de" ? "Unbekannt" : "Unknown");
+          const title = sl.label || (folder ? folder.name : (lang === "de" ? "Geteilte Auswahl" : "Shared selection"));
+          const created = sl.createdAt?.toDate ? sl.createdAt.toDate().toLocaleDateString(lang === "de" ? "de-DE" : "en-US", { day: "2-digit", month: "2-digit", year: "2-digit" }) : "—";
+          const base = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
+            ? "https://picpop-bilddatenbank.web.app"
+            : window.location.origin;
+          const fullUrl = `${base}/s/${sl.id}`;
           return (
-            <div key={sl.id} className="row" style={{ padding: "14px 20px", borderBottom: "1px solid var(--line)", cursor: "pointer" }} onClick={onOpenShare}>
+            <div key={sl.id} className="row" style={{ padding: "14px 20px", borderBottom: "1px solid var(--line)", cursor: onReopen ? "pointer" : "default" }}
+              onClick={() => onReopen?.(sl)}
+              title={lang === "de" ? "Klicken, um Link zu öffnen/bearbeiten" : "Click to open/edit link"}>
               <div style={{ flex: 2, minWidth: 0 }} className="row" >
                 <div style={{ width: 32, height: 32, background: "var(--accent-soft)", color: "var(--accent)", borderRadius: 4, display: "inline-flex", alignItems: "center", justifyContent: "center", marginRight: 12, flex: "none" }}>
                   <window.Icon.link size={14} />
                 </div>
                 <div style={{ minWidth: 0 }}>
-                  <div className="clamp-1" style={{ fontWeight: 500, fontSize: 13 }}>{target ? target.name : sl.asset}</div>
-                  <div className="mono" style={{ color: "var(--muted)" }}>picpop.app/s/{sl.id.slice(-6)}</div>
+                  <div className="clamp-1" style={{ fontWeight: 500, fontSize: 13 }}>{title}{sl.assetCount ? <span style={{ color: "var(--muted)", fontWeight: 400 }}> · {sl.assetCount} {lang === "de" ? "Bilder" : "images"}</span> : null}</div>
+                  <div className="mono" style={{ color: "var(--muted)" }}>/s/{sl.id.slice(-6)}</div>
                 </div>
               </div>
               <div style={{ width: 160 }} className="row">
-                <window.Avatar user={user} size={20} />
-                <span style={{ fontSize: 12, marginLeft: 8 }} className="clamp-1">{user.name}</span>
+                {user && <window.Avatar user={user} size={20} />}
+                <span style={{ fontSize: 12, marginLeft: user ? 8 : 0 }} className="clamp-1">{byName}</span>
               </div>
-              <div style={{ width: 120, fontSize: 12, color: "var(--muted)" }}>{sl.created}</div>
+              <div style={{ width: 120, fontSize: 12, color: "var(--muted)" }}>{created}</div>
               <div style={{ width: 120, fontSize: 12, color: "var(--muted)" }}>{sl.expires || t("never")}</div>
-              <div style={{ width: 80, textAlign: "right" }} className="num">{sl.views}</div>
-              <div style={{ width: 40, textAlign: "right" }}><button className="btn icon ghost sm"><window.Icon.more size={14} /></button></div>
+              <div style={{ width: 80, textAlign: "right" }} className="num">
+                <button className="btn icon ghost sm" title={lang === "de" ? "Link kopieren" : "Copy link"}
+                  onClick={(e) => { e.stopPropagation(); navigator.clipboard?.writeText(fullUrl); }}>
+                  <window.Icon.link size={13} />
+                </button>
+              </div>
+              <div style={{ width: 40, textAlign: "right" }}>
+                <button className="btn icon ghost sm" title={lang === "de" ? "Link löschen" : "Delete link"}
+                  onClick={(e) => { e.stopPropagation(); if (confirm(lang === "de" ? "Diesen Link wirklich löschen? Empfänger können ihn dann nicht mehr öffnen." : "Delete this link? Recipients will no longer be able to open it.")) window.dbDeleteShareLink?.(sl.id); }}>
+                  <window.Icon.trash size={13} />
+                </button>
+              </div>
             </div>
           );
         })}
@@ -1053,17 +1103,7 @@ function RecentUploadsView({ assets: assetsProp, area, lang, query,
 
   const items = useMemoV(() => {
     let xs = allItems;
-    if (query) {
-      const q = query.toLowerCase();
-      xs = xs.filter(a =>
-        a.title.toLowerCase().includes(q) ||
-        a.author.toLowerCase().includes(q) ||
-        (a.notes||"").toLowerCase().includes(q) ||
-        (a.aiDescription||"").toLowerCase().includes(q) ||
-        (folderNameMap[a.folderId] || "").toLowerCase().includes(q) ||
-        (window.effectiveTags?.(a) || a.tags).some(tid => { const tg = window.tagById(tid); return tg && (tg.name.toLowerCase().includes(q) || (tg.name_en||"").toLowerCase().includes(q)); })
-      );
-    }
+    if (query) xs = xs.filter(a => assetMatchesQuery(a, query, folderNameMap[a.folderId]));
     if (filterYear) xs = xs.filter(a => { const d = new Date(a.takenAt || a.date); return d.getFullYear() === filterYear; });
     if (filterMonth !== null && filterMonth !== undefined) xs = xs.filter(a => { const d = new Date(a.takenAt || a.date); return d.getMonth() === filterMonth; });
     if (filterTags && filterTags.length > 0) xs = xs.filter(a => filterTags.every(tid => a.tags.includes(tid)));
@@ -1074,10 +1114,10 @@ function RecentUploadsView({ assets: assetsProp, area, lang, query,
   // Folder search — only active when query is set
   const matchingFolders = useMemoV(() => {
     if (!query) return [];
-    const q = query.toLowerCase();
+    const terms = parseSearchTerms(query);
     const imgFolders = (imageFolders || window.FOLDERS || []).map(f => ({ ...f, _kind: "image" }));
     const printFolders = (pdfFolders || window.PDF_FOLDERS || []).map(f => ({ ...f, _kind: "pdf" }));
-    return [...imgFolders, ...printFolders].filter(f => f.name.toLowerCase().includes(q));
+    return [...imgFolders, ...printFolders].filter(f => { const n = (f.name || "").toLowerCase(); return terms.every(term => n.includes(term)); });
   }, [query, imageFolders, pdfFolders]);
 
   const lastSelRef = useRefV(null);
@@ -1368,17 +1408,7 @@ function AllAssetsView({ assets: assetsProp, area, lang, onOpenAsset, onShareTar
 
   const filtered = useMemoV(() => {
     let arr = all;
-    if (query) {
-      const q = query.toLowerCase();
-      arr = arr.filter(a =>
-        a.title.toLowerCase().includes(q) ||
-        a.author.toLowerCase().includes(q) ||
-        (a.notes||"").toLowerCase().includes(q) ||
-        (a.aiDescription||"").toLowerCase().includes(q) ||
-        (folderNameMap[a.folderId] || "").toLowerCase().includes(q) ||
-        (window.effectiveTags?.(a) || a.tags).some(tid => { const tg = window.tagById(tid); return tg && (tg.name.toLowerCase().includes(q) || (tg.name_en||"").toLowerCase().includes(q)); })
-      );
-    }
+    if (query) arr = arr.filter(a => assetMatchesQuery(a, query, folderNameMap[a.folderId]));
     if (activeTags.size > 0) arr = arr.filter(a => [...activeTags].every(tid => a.tags.includes(tid)));
     if (activeAuthor) arr = arr.filter(a => a.author === activeAuthor);
     arr = [...arr];
@@ -1556,17 +1586,7 @@ function FavoritesView({ assets: assetsProp, area, lang, onOpenAsset, onOpenFold
     let xs = assets.filter(a => favorites.has(a.id));
     if (area === "print") xs = xs.filter(inPrint);
     else xs = xs.filter(a => !inPrint(a));
-    if (query) {
-      const q = query.toLowerCase();
-      xs = xs.filter(a =>
-        a.title.toLowerCase().includes(q) ||
-        a.author.toLowerCase().includes(q) ||
-        (a.notes||"").toLowerCase().includes(q) ||
-        (a.aiDescription||"").toLowerCase().includes(q) ||
-        (favFolderNameMap[a.folderId] || "").toLowerCase().includes(q) ||
-        (window.effectiveTags?.(a) || a.tags).some(tid => { const tg = window.tagById(tid); return tg && (tg.name.toLowerCase().includes(q) || (tg.name_en||"").toLowerCase().includes(q)); })
-      );
-    }
+    if (query) xs = xs.filter(a => assetMatchesQuery(a, query, favFolderNameMap[a.folderId]));
     return [...xs].sort((a, b) => (a.date < b.date ? 1 : -1));
   }, [assets, favorites, area, query, favFolderNameMap]);
 

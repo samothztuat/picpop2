@@ -158,7 +158,8 @@ const server = http.createServer(async (req, res) => {
   if (pathname === '/api/deploy' && req.method === 'POST') {
     try {
       const output = await new Promise((resolve, reject) => {
-        exec('firebase deploy --only hosting', { cwd: ROOT, maxBuffer: 16 * 1024 * 1024 }, (err, stdout, stderr) => {
+        const firebaseBin = '/Users/tomtautz/.nvm/versions/node/v20.20.0/bin/firebase';
+        exec(`${firebaseBin} deploy --only hosting`, { cwd: ROOT, maxBuffer: 16 * 1024 * 1024 }, (err, stdout, stderr) => {
           const out = (stdout + '\n' + stderr).trim();
           if (err) reject(new Error(out || err.message));
           else resolve(out);

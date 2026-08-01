@@ -79,7 +79,11 @@ async function describeImageWithAI(imageUrl) {
         }],
       }),
     });
-    if (!res.ok) { console.warn("[describeImage] HTTP", res.status); return null; }
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => ({}));
+      console.warn("[describeImage] HTTP", res.status, errBody?.error?.message || JSON.stringify(errBody));
+      return null;
+    }
     const data = await res.json();
     return data.choices?.[0]?.message?.content?.trim() || null;
   } catch (e) {
@@ -163,6 +167,85 @@ async function describePdfWithAI(pdfUrl) {
   } catch (e) {
     console.warn("[describePdf]", e.message);
     return null;
+  }
+}
+
+// ── OpenAI Vision: fotografische Attribute analysieren ───────────────────────
+// Gibt ein Array deutscher Begriffe zurück, z.B. ["Querformat","Totale","Bokeh"]
+// Orientierung wird direkt aus ratio berechnet — kein AI-Call nötig.
+const PHOTO_ATTR_PROMPT = `Du bist ein erfahrener Fotograf und Bildredakteur. Analysiere dieses Foto präzise und benenne alle klar erkennbaren fotografischen Eigenschaften.
+
+BILDAUSSCHNITT (genau einen wählen):
+Close-up, Detailaufnahme, Nahaufnahme, Halbnahaufnahme, Halbtotale, Totale, Weiteinstellung
+
+PERSPEKTIVE (genau eine wählen):
+Augenhöhe, Vogelperspektive, Froschperspektive, Untersicht, Schrägsicht, Draufsicht
+
+OPTIK / BRENNWEITE (falls erkennbar):
+Weitwinkel, Normalobjektiv, Teleobjektiv, Makroaufnahme, Fisheye
+
+SCHÄRFE (falls erkennbar — mehrere möglich):
+Bokeh, Geringe Tiefenschärfe, Große Tiefenschärfe, Unscharf, Bewegungsunschärfe, Verwackelt, Selektive Schärfe
+
+LICHT (einen oder mehrere wählen):
+Natürliches Licht, Studioaufnahme, Gegenlicht, Kunstlicht, Blitzlicht, Silhouette, Hartes Licht, Weiches Licht, Sonnenlicht, Schattenwurf, Nachtaufnahme, Gegenlicht-Silhouette
+
+FARBE / TONALITÄT (falls erkennbar):
+Schwarzweiß, Sepia, Monochrom, Pastellfarben, Kräftige Farben, Warme Töne, Kalte Töne, Entsättigt, Farbkontrast
+
+BILDSTIMMUNG (einen oder mehrere wählen):
+Dynamisch, Ruhig, Dramatisch, Lebendig, Minimalistisch, High-Key, Low-Key, Verspielt, Elegant, Emotional, Melancholisch, Energetisch
+
+BESONDERE MERKMALE (falls eindeutig erkennbar):
+Spiegelung, Symmetrie, Langzeitbelichtung, Mehrfachbelichtung, HDR, Unschärfeverlauf, Rahmung, Diagonale Komposition, Führende Linien
+
+Antworte NUR mit einem JSON-Array. Nenne ausschließlich klar erkennbare Eigenschaften — lieber mehr als zu wenig.
+Beispiel: ["Nahaufnahme","Augenhöhe","Bokeh","Geringe Tiefenschärfe","Natürliches Licht","Warme Töne","Ruhig","Selektive Schärfe"]`;
+
+async function analyzePhotoAttrsWithAI(imageUrl, ratio) {
+  const key = window.AI_CONFIG?.openaiKey;
+  if (!key || !imageUrl) return null;
+  const attrs = [];
+  // Orientierung aus ratio ableiten — kein AI-Call
+  if (ratio != null) {
+    if (ratio > 1.25)      attrs.push("Querformat");
+    else if (ratio < 0.8)  attrs.push("Hochformat");
+    else                   attrs.push("Quadratisch");
+  }
+  try {
+    const res = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${key}` },
+      body: JSON.stringify({
+        model: "gpt-4o-mini",
+        max_tokens: 300,
+        messages: [{
+          role: "user",
+          content: [
+            { type: "text",      text: PHOTO_ATTR_PROMPT },
+            { type: "image_url", image_url: { url: imageUrl, detail: "high" } },
+          ],
+        }],
+      }),
+    });
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => ({}));
+      console.warn("[photoAttrs] HTTP", res.status, errBody?.error?.message || JSON.stringify(errBody));
+      console.warn("[photoAttrs] URL used:", imageUrl?.substring(0, 100));
+      return attrs.length ? attrs : null;
+    }
+    const data = await res.json();
+    const raw = data.choices?.[0]?.message?.content?.trim() || "[]";
+    // JSON-Array aus der Antwort extrahieren (auch wenn GPT Markdown-Fences dazufügt)
+    const match = raw.match(/\[[\s\S]*\]/);
+    if (match) {
+      const aiAttrs = JSON.parse(match[0]);
+      attrs.push(...aiAttrs.filter(a => typeof a === "string"));
+    }
+    return attrs.length ? attrs : null;
+  } catch (e) {
+    console.warn("[photoAttrs]", e.message);
+    return attrs.length ? attrs : null;
   }
 }
 
@@ -343,7 +426,16 @@ function subscribeToActivity(cb) {
 
 function subscribeToSharedLinks(cb) {
   return tenantCol("sharedLinks")
-    .onSnapshot(snap => cb(snap.docs.map(d => d.data())));
+    .onSnapshot(snap => {
+      const docs = snap.docs.map(d => d.data());
+      // Neueste zuerst (createdAt kann beim ersten Snapshot noch null sein → ans Ende)
+      docs.sort((a, b) => {
+        const am = a.createdAt?.toMillis ? a.createdAt.toMillis() : 0;
+        const bm = b.createdAt?.toMillis ? b.createdAt.toMillis() : 0;
+        return bm - am;
+      });
+      cb(docs);
+    });
 }
 
 function subscribeToTags(cb) {
@@ -368,20 +460,131 @@ async function dbDeleteTagCollection(id) {
   await tenantCol("tagCollections").doc(id).delete();
 }
 
-// ── Share links (root collection — readable without auth for external recipients) ──
+// ══════════════════════════════════════════════════════════════════════════════
+//  NUTZERGRUPPEN & BEREICHE (Rechtesystem, portiert aus contextr)
+// ══════════════════════════════════════════════════════════════════════════════
+
+// ── Bereiche (Scopes) — eine Liste im Doc settings/bereiche ──────────────────
+function subscribeToBereiche(cb) {
+  return tenantDoc("settings", "bereiche").onSnapshot(snap => {
+    const liste = snap.exists ? (snap.data().liste || []) : [];
+    cb(Array.isArray(liste) ? liste : []);
+  });
+}
+async function dbSaveBereiche(liste) {
+  await tenantDoc("settings", "bereiche").set({ liste }, { merge: true });
+}
+
+// ── Gruppen ──────────────────────────────────────────────────────────────────
+function subscribeToGroups(cb) {
+  return tenantCol("groups").onSnapshot(snap => {
+    const docs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    docs.sort((a, b) => (a.name || "").localeCompare(b.name || "", "de"));
+    cb(docs);
+  });
+}
+async function dbSaveGroup(group) {
+  const id = group.id || ("g-" + Date.now() + "-" + Math.random().toString(36).slice(2, 6));
+  await tenantCol("groups").doc(id).set({ ...group, id }, { merge: true });
+  return id;
+}
+async function dbDeleteGroup(id) {
+  await tenantCol("groups").doc(id).delete();
+}
+
+// CSV-Import von Nutzergruppen (Microsoft-Entra-ID-Export).
+// Erwartet Kopfzeile mit Spalten "displayName" und "id" (Reihenfolge egal,
+// Trennzeichen ; oder ,). Entfernt Präfix "SG_<tenant>_" und macht _/- zu Leerzeichen.
+function parseGroupsCsv(text, tenantId) {
+  const clean = String(text || "").replace(/^﻿/, "");
+  const lines = clean.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  if (lines.length < 2) return [];
+  const sep = (lines[0].match(/;/g) || []).length >= (lines[0].match(/,/g) || []).length ? ";" : ",";
+  const strip = s => String(s || "").trim().replace(/^"|"$/g, "");
+  const header = lines[0].split(sep).map(h => strip(h).toLowerCase());
+  const iName = header.indexOf("displayname");
+  const iId = header.indexOf("id");
+  if (iName < 0) return [];
+  const prefix = new RegExp("^sg_" + (tenantId || "").toLowerCase() + "_", "i");
+  const out = [];
+  for (let i = 1; i < lines.length; i++) {
+    const cols = lines[i].split(sep).map(strip);
+    const externalName = cols[iName];
+    if (!externalName) continue;
+    const externalId = iId >= 0 ? cols[iId] : "";
+    const name = externalName.replace(prefix, "").replace(/^SG_[^_]+_/i, "").replace(/[_-]+/g, " ").trim();
+    out.push({ name: name || externalName, externalName, externalId, quelle: "csv" });
+  }
+  return out;
+}
+
+// ── Cloud-Function-Aufrufe (Rechte/Claims serverseitig) ──────────────────────
+async function fnListTenantUsers(tenantId) {
+  const fn = window._picpopFunctions.httpsCallable("listTenantUsers");
+  const res = await fn({ tenantId: tenantId || window.TENANT_ID });
+  return res.data?.users || [];
+}
+async function fnSetUserGroups(uid, groupIds, tenantId) {
+  const fn = window._picpopFunctions.httpsCallable("setUserGroups");
+  return (await fn({ tenantId: tenantId || window.TENANT_ID, uid, groupIds })).data;
+}
+async function fnSetUserRole(uid, role, tenantId) {
+  const fn = window._picpopFunctions.httpsCallable("setUserRole");
+  return (await fn({ tenantId: tenantId || window.TENANT_ID, uid, role })).data;
+}
+async function fnRefreshTenantClaims(tenantId) {
+  const fn = window._picpopFunctions.httpsCallable("refreshTenantClaims");
+  return (await fn({ tenantId: tenantId || window.TENANT_ID })).data;
+}
+// Gefahrenzone: alle Backend-Konten eines Mandanten löschen (Superadmin ausgenommen).
+// `confirm` muss exakt die tenantId sein.
+async function fnPurgeTenantUsers(tenantId, confirm) {
+  const fn = window._picpopFunctions.httpsCallable("adminPurgeTenantUsers");
+  return (await fn({ tenantId: tenantId || window.TENANT_ID, confirm })).data;
+}
+
+// ── Share links ──────────────────────────────────────────────────────────────
+// Zwei Speicherorte, bewusst getrennt:
+//  1. Root `shareLinks/{slug}` — vollständige Nutzlast (assets etc.), OHNE Login
+//     lesbar, damit externe Empfänger den Link öffnen können.
+//  2. Tenant `tenants/{id}/sharedLinks/{slug}` — leichter Index-Eintrag (ohne die
+//     schwere assets-Liste) für die interne Übersicht „Geteilte Links". Diese
+//     Subsammlung ist wie assets/folders sauber pro Tenant abgesichert und wird
+//     von subscribeToSharedLinks gelistet.
 async function dbCreateShareLink(slug, data) {
+  const createdAt = firebase.firestore.FieldValue.serverTimestamp();
+  // 1. Vollständiger, öffentlich lesbarer Eintrag
   await db.collection("shareLinks").doc(slug).set({
     ...data,
     tenant: window.TENANT_ID,
-    createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+    createdAt,
+  });
+  // 2. Schlanker Index-Eintrag im Tenant (ohne assets-Snapshot — nur Metadaten)
+  const { assets, ...meta } = data;
+  await tenantCol("sharedLinks").doc(slug).set({
+    ...meta,
+    id: slug,
+    assetCount: Array.isArray(assets) ? assets.length : 0,
+    createdAt,
   });
 }
 async function dbGetShareLink(slug) {
   const doc = await db.collection("shareLinks").doc(slug).get();
   return doc.exists ? doc.data() : null;
 }
+// Einstellungen eines bestehenden Links nachträglich ändern (nicht die assets).
+// Schreibt in beide Dokumente (öffentlich + Tenant-Index).
+async function dbUpdateShareLink(slug, patch) {
+  await Promise.all([
+    db.collection("shareLinks").doc(slug).set(patch, { merge: true }),
+    tenantCol("sharedLinks").doc(slug).set(patch, { merge: true }),
+  ]);
+}
 async function dbDeleteShareLink(slug) {
-  await db.collection("shareLinks").doc(slug).delete();
+  await Promise.all([
+    db.collection("shareLinks").doc(slug).delete(),
+    tenantCol("sharedLinks").doc(slug).delete(),
+  ]);
 }
 
 // ── Write operations ──────────────────────────────────────────────────────────
@@ -532,6 +735,7 @@ async function uploadAsset(file, folderId, tags = [], onProgress = null, author 
   let pages = 1;
   let widthMm = null, heightMm = null;
   let thumbnailUrl = null;
+  let aiImageDataUrl = null; // base64 data URL of thumbnail — used for AI calls to avoid Storage URL issues
 
   if (isPdf) {
     if (window.pdfjsLib) {
@@ -573,8 +777,10 @@ async function uploadAsset(file, folderId, tags = [], onProgress = null, author 
       }
     }
   } else {
-    // Generate JPEG thumbnail from local file — no CORS issues, file still in memory
-    const THUMB_LONG = 1400;
+    // Generate JPEG thumbnail from local file — no CORS issues, file still in memory.
+    // 800px Längsseite: für Grid-Kacheln (160–280px, auch @2x Retina) mehr als genug,
+    // ~75% kleinere Dateien als zuvor (1400px) → deutlich schnelleres Laden im Raster.
+    const THUMB_LONG = 800;
     try {
       const blobUrl = URL.createObjectURL(file);
       const imgEl = await new Promise((res, rej) => {
@@ -592,7 +798,9 @@ async function uploadAsset(file, folderId, tags = [], onProgress = null, author 
       cv.width     = Math.round(width  * scale);
       cv.height    = Math.round(height * scale);
       cv.getContext("2d").drawImage(imgEl, 0, 0, cv.width, cv.height);
-      const thumbBlob = await new Promise(r => cv.toBlob(r, "image/jpeg", 0.85));
+      // Capture data URL for AI analysis — avoids Firebase Storage URL access issues
+      aiImageDataUrl = cv.toDataURL("image/jpeg", 0.85);
+      const thumbBlob = await new Promise(r => cv.toBlob(r, "image/jpeg", 0.82));
       const thumbRef  = storage.ref(`tenants/${window.TENANT_ID}/thumbnails/${id}/thumb.jpg`);
       await thumbRef.put(thumbBlob);
       thumbnailUrl = await thumbRef.getDownloadURL();
@@ -614,15 +822,32 @@ async function uploadAsset(file, folderId, tags = [], onProgress = null, author 
   // Bild in Print  → Vision mit OCR/Text-Fokus (Anzeigen, Plakate)
   // Bild in Images → Vision mit Bildbeschreibungs-Prompt
   let aiDescription = "";
+  let photoAttrs = null;
   if (storageUrl) {
-    if (!window.AI_CONFIG?.openaiKey) await loadAiConfig();
-    if (window.AI_CONFIG?.openaiKey) {
-      if (isPdf) {
-        aiDescription = (await describePdfWithAI(storageUrl)) || "";
-      } else if (area === "print") {
-        aiDescription = (await describePrintImageWithAI(storageUrl)) || "";
-      } else {
-        aiDescription = (await describeImageWithAI(storageUrl)) || "";
+    // Immer laden — gecachter leerer String würde sonst die Prüfung überspringen
+    await loadAiConfig();
+    const aiKey = window.AI_CONFIG?.openaiKey;
+    // Bevorzuge base64 data URL (Browser-lokal), Fallback auf Storage URL
+    const aiUrl = aiImageDataUrl || storageUrl;
+    console.log("[uploadAsset] AI key:", !!aiKey, "| dataUrl:", !!aiImageDataUrl, "| area:", area, "| isPdf:", isPdf);
+    if (aiKey) {
+      try {
+        if (isPdf) {
+          aiDescription = (await describePdfWithAI(storageUrl)) || "";
+        } else if (area === "print") {
+          aiDescription = (await describePrintImageWithAI(aiUrl)) || "";
+        } else {
+          // Foto: Beschreibung + Foto-Attribute parallel analysieren
+          const [desc, attrs] = await Promise.all([
+            describeImageWithAI(aiUrl).catch(e => { console.warn("[uploadAsset] describeImage failed:", e.message); return ""; }),
+            analyzePhotoAttrsWithAI(aiUrl, ratio).catch(e => { console.warn("[uploadAsset] photoAttrs failed:", e.message); return null; }),
+          ]);
+          aiDescription = desc || "";
+          photoAttrs = attrs;
+          console.log("[uploadAsset] AI done — desc:", !!aiDescription, "| attrs:", photoAttrs);
+        }
+      } catch (e) {
+        console.warn("[uploadAsset] AI analysis failed:", e.message);
       }
     }
   }
@@ -661,6 +886,7 @@ async function uploadAsset(file, folderId, tags = [], onProgress = null, author 
     batchId: batchId || null,
     notes: "",
     aiDescription,
+    photoAttrs: photoAttrs || [],
     campaign: "",
     embargo: null,
     ...(isPdf ? { pages, ...(widthMm ? { widthMm, heightMm } : {}) } : { width, height }),
@@ -670,7 +896,58 @@ async function uploadAsset(file, folderId, tags = [], onProgress = null, author 
   return asset;
 }
 
+// ── Thumbnail aus einem bereits geladenen <img> erzeugen + hochladen ─────────
+// Zeichnet das (CORS-sauber geladene) Bild auf ein Canvas, skaliert auf longPx,
+// lädt das JPEG hoch und schreibt thumbnailUrl (+ ratio) ins Asset-Dokument.
+async function _uploadThumbFromImg(asset, imgEl, longPx = 800) {
+  const w = imgEl.naturalWidth, h = imgEl.naturalHeight;
+  if (!w || !h) throw new Error("Bild ohne Maße");
+  const ratio = w / h || asset.ratio || 1.5;
+  const scale = Math.min(1, longPx / Math.max(w, h));
+  const cv = document.createElement("canvas");
+  cv.width  = Math.round(w * scale);
+  cv.height = Math.round(h * scale);
+  cv.getContext("2d").drawImage(imgEl, 0, 0, cv.width, cv.height);
+  const thumbBlob = await new Promise((r, rej) => cv.toBlob(b => b ? r(b) : rej(new Error("toBlob fehlgeschlagen (Canvas getaintet?)")), "image/jpeg", 0.82));
+  const thumbRef = storage.ref(`tenants/${window.TENANT_ID}/thumbnails/${asset.id}/thumb.jpg`);
+  await thumbRef.put(thumbBlob);
+  const thumbnailUrl = await thumbRef.getDownloadURL();
+  await tenantCol("assets").doc(asset.id).update({ thumbnailUrl, ratio });
+  return { thumbnailUrl, bytes: thumbBlob.size };
+}
+
+// Nachträglich (Batch): lädt das Originalbild crossOrigin und erzeugt ein Thumbnail.
+async function regenerateThumbnail(asset, longPx = 800) {
+  if (!asset?.id || !asset.storageUrl) throw new Error("kein storageUrl");
+  const imgEl = await new Promise((res, rej) => {
+    const i = new Image();
+    i.crossOrigin = "anonymous";
+    i.onload = () => res(i);
+    i.onerror = () => rej(new Error("Bild nicht ladbar (CORS?)"));
+    i.src = asset.storageUrl;
+  });
+  return _uploadThumbFromImg(asset, imgEl, longPx);
+}
+
+// Selbstheilung: erzeugt aus einem im Grid bereits geladenen <img> ein Thumbnail.
+// Wird von AssetImg aufgerufen, wenn ein Bild OHNE thumbnailUrl angezeigt wurde.
+async function backfillThumbnailFromImg(asset, imgEl, longPx = 800) {
+  if (!asset?.id || asset.thumbnailUrl || !imgEl) return null;
+  try {
+    return await _uploadThumbFromImg(asset, imgEl, longPx);
+  } catch (e) {
+    console.warn("[thumb-backfill]", asset.id, e.message);
+    return null;
+  }
+}
+
 Object.assign(window, {
+  // Nutzergruppen & Rechte
+  subscribeToBereiche, dbSaveBereiche,
+  subscribeToGroups, dbSaveGroup, dbDeleteGroup, parseGroupsCsv,
+  fnListTenantUsers, fnSetUserGroups, fnSetUserRole, fnRefreshTenantClaims, fnPurgeTenantUsers,
+  regenerateThumbnail,
+  backfillThumbnailFromImg,
   db,
   storage,
   TENANT_ID: window.TENANT_ID,
@@ -681,6 +958,7 @@ Object.assign(window, {
   describeImageWithAI,
   describePrintImageWithAI,
   describePdfWithAI,
+  analyzePhotoAttrsWithAI,
   seedIfEmpty,
   seedPrintTags,
   migrateAssetUnassignedTags,
@@ -691,6 +969,7 @@ Object.assign(window, {
   subscribeToSharedLinks,
   dbCreateShareLink,
   dbGetShareLink,
+  dbUpdateShareLink,
   dbDeleteShareLink,
   subscribeToTags,
   subscribeToTeam,

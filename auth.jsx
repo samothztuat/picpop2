@@ -5,12 +5,32 @@ const { useState: useStateLogin, useEffect: useEffectLogin } = React;
 const _auth = firebase.auth();
 const _googleProvider = new firebase.auth.GoogleAuthProvider();
 
+// Microsoft (Entra ID / Azure AD) SSO. Pro picpop-Mandant kann eine Azure-
+// Verzeichnis-(Directory-)ID hinterlegt werden — dann ist der Login auf genau
+// diese Organisation beschränkt. Ohne Eintrag: Arbeits-/Schulkonten aller
+// Organisationen ("organizations", keine privaten Konten).
+// Hinweis: Directory-ID ist NICHT geheim. Client-ID + Secret liegen serverseitig
+// in der Firebase-Console (Authentication → Microsoft) — NIE im Client-Code.
+const MS_ENTRA_TENANTS = {
+  phaeno: "c20f8d61-587a-4dba-9fcd-ffa942e9ac59",
+};
+function buildMicrosoftProvider() {
+  const provider = new firebase.auth.OAuthProvider("microsoft.com");
+  provider.addScope("openid");
+  provider.addScope("email");
+  provider.addScope("profile");
+  const dir = MS_ENTRA_TENANTS[window.TENANT_ID] || window.MS_ENTRA_TENANT || "organizations";
+  provider.setCustomParameters({ tenant: dir, prompt: "select_account" });
+  return provider;
+}
+
 // ── Login Screen ──────────────────────────────────────────────────────────────
 function LoginScreen({ tenantId }) {
   const [email,       setEmail]       = useStateLogin("");
   const [password,    setPassword]    = useStateLogin("");
   const [loading,     setLoading]     = useStateLogin(false);
   const [googleLoading, setGoogleLoading] = useStateLogin(false);
+  const [msLoading,    setMsLoading]    = useStateLogin(false);
   const [error,       setError]       = useStateLogin("");
   const [showPw,      setShowPw]      = useStateLogin(false);
 
@@ -39,6 +59,19 @@ function LoginScreen({ tenantId }) {
     }
   }
 
+  async function handleMicrosoft() {
+    setMsLoading(true);
+    setError("");
+    try {
+      await _auth.signInWithPopup(buildMicrosoftProvider());
+    } catch (err) {
+      if (err.code !== "auth/popup-closed-by-user" && err.code !== "auth/cancelled-popup-request") {
+        setError(friendlyError(err.code, err.message));
+      }
+      setMsLoading(false);
+    }
+  }
+
   function friendlyError(code, fallback) {
     switch (code) {
       case "auth/user-not-found":      return "Kein Konto mit dieser E-Mail gefunden.";
@@ -47,6 +80,9 @@ function LoginScreen({ tenantId }) {
       case "auth/too-many-requests":   return "Zu viele Versuche. Bitte kurz warten.";
       case "auth/invalid-credential":  return "E-Mail oder Passwort falsch.";
       case "auth/popup-blocked":       return "Popup wurde blockiert. Bitte Popup-Blocker deaktivieren.";
+      case "auth/operation-not-allowed": return "Microsoft-Anmeldung ist in Firebase noch nicht aktiviert.";
+      case "auth/account-exists-with-different-credential": return "Für diese E-Mail existiert bereits ein Konto mit anderer Anmeldemethode.";
+      case "auth/unauthorized-domain": return "Diese Domain ist in Firebase nicht als autorisiert hinterlegt.";
       default: return fallback || "Anmeldung fehlgeschlagen.";
     }
   }
@@ -59,7 +95,7 @@ function LoginScreen({ tenantId }) {
     fontFamily: "var(--font-sans)",
   };
 
-  const busy = loading || googleLoading;
+  const busy = loading || googleLoading || msLoading;
 
   return (
     <div style={{
@@ -116,6 +152,30 @@ function LoginScreen({ tenantId }) {
             ? <Spinner />
             : <GoogleIcon />}
           Mit Google anmelden
+        </button>
+
+        {/* ── Microsoft button ── */}
+        <button
+          type="button"
+          onClick={handleMicrosoft}
+          disabled={busy}
+          style={{
+            width: "100%", height: 38,
+            display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
+            background: "var(--panel)", color: "var(--fg)",
+            border: "1px solid var(--line-strong)", borderRadius: 4,
+            cursor: busy ? "default" : "pointer", fontSize: 13, fontWeight: 500,
+            opacity: busy ? 0.6 : 1, transition: "background .15s, opacity .15s",
+            marginBottom: 20,
+            fontFamily: "var(--font-sans)",
+          }}
+          onMouseEnter={e => { if (!busy) e.currentTarget.style.background = "var(--hover)"; }}
+          onMouseLeave={e => { e.currentTarget.style.background = "var(--panel)"; }}
+        >
+          {msLoading
+            ? <Spinner />
+            : <MicrosoftIcon />}
+          Mit Microsoft anmelden
         </button>
 
         {/* ── Divider ── */}
@@ -211,13 +271,40 @@ function GoogleIcon() {
   );
 }
 
+function MicrosoftIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 23 23" aria-hidden="true">
+      <rect x="1"  y="1"  width="10" height="10" fill="#F25022"/>
+      <rect x="12" y="1"  width="10" height="10" fill="#7FBA00"/>
+      <rect x="1"  y="12" width="10" height="10" fill="#00A4EF"/>
+      <rect x="12" y="12" width="10" height="10" fill="#FFB900"/>
+    </svg>
+  );
+}
+
 // ── useAuth hook ──────────────────────────────────────────────────────────────
 function useAuth() {
   const [user,      setUser]      = useStateLogin(null);
   const [authReady, setAuthReady] = useStateLogin(false);
 
   useEffectLogin(() => {
-    const unsub = _auth.onAuthStateChanged(u => {
+    const unsub = _auth.onAuthStateChanged(async u => {
+      if (u) {
+        // Auto-switch tenant: look up userTenants/{uid} and redirect if needed
+        try {
+          const utDoc = await firebase.firestore().collection("userTenants").doc(u.uid).get();
+          if (utDoc.exists) {
+            const correctTenant = utDoc.data().tenantId;
+            if (correctTenant && correctTenant !== window.TENANT_ID) {
+              // Redirect to same URL but with correct ?t= param, preserving path
+              const url = new URL(window.location.href);
+              url.searchParams.set("t", correctTenant);
+              window.location.replace(url.toString());
+              return; // don't update state, redirect is happening
+            }
+          }
+        } catch (_) {}
+      }
       setUser(u);
       window.CURRENT_USER = u || null;
       setAuthReady(true);

@@ -421,13 +421,15 @@ function Sidebar({ area, setArea, folders, route, setRoute, lang, onUpload, onCr
         </div>
       </div>
 
-      {/* Upload */}
-      <div style={{ padding: col ? "4px 6px 8px" : "8px 12px 12px" }}>
-        <button className="btn primary" style={{ width: "100%", justifyContent: "center" }} onClick={onUpload} title={col ? t("upload") : undefined}>
-          <window.Icon.upload size={14} />
-          {!col && <span style={{ marginLeft: 6 }}>{t("upload")}</span>}
-        </button>
-      </div>
+      {/* Upload — im „Als User anzeigen"-Modus für rein lesende Nutzer ausgeblendet */}
+      {!window.ppIsViewer?.() && (
+        <div style={{ padding: col ? "4px 6px 8px" : "8px 12px 12px" }}>
+          <button className="btn primary" style={{ width: "100%", justifyContent: "center" }} onClick={onUpload} title={col ? t("upload") : undefined}>
+            <window.Icon.upload size={14} />
+            {!col && <span style={{ marginLeft: 6 }}>{t("upload")}</span>}
+          </button>
+        </div>
+      )}
 
       <nav className="scroll" style={{ padding: col ? "4px 4px 12px" : "4px 8px 12px", flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
         {/* Overview links */}
@@ -710,7 +712,7 @@ function Sidebar({ area, setArea, folders, route, setRoute, lang, onUpload, onCr
             {!col && <span>Admin</span>}
           </div>
         )}
-        {!col && (
+        {!col && currentUser?.email === window.SUPERADMIN_EMAIL && !window.ppViewAs?.() && (
           <div className="nav-item" onClick={() => onDevOpen?.()} style={{ opacity: 0.45 }}>
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
               <polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/>
@@ -1144,6 +1146,22 @@ function App() {
 
   const t = window.makeT(lang);
 
+  // Enriched user: Firebase Auth user merged with Firestore firstName/lastName
+  const [enrichedUser, setEnrichedUser] = useStateA(null);
+  useEffectA(() => {
+    if (!user) { setEnrichedUser(null); return; }
+    setEnrichedUser(user); // show immediately with auth data
+    // then enrich with Firestore profile
+    window.db?.collection("tenants").doc(window.TENANT_ID).collection("users").doc(user.uid).get()
+      .then(snap => {
+        if (snap.exists) {
+          const d = snap.data();
+          setEnrichedUser({ ...user, firstName: d.firstName || "", lastName: d.lastName || "", displayName: d.displayName || user.displayName || "" });
+        }
+      })
+      .catch(() => {});
+  }, [user]);
+
   const [area, setArea] = useStateA("images"); // "images" | "print"
   const [route, setRoute] = useStateA("recent");
 
@@ -1171,14 +1189,15 @@ function App() {
   const hasFilter = filterYear !== null || filterMonth !== null || filterTags.length > 0 || filterAuthor !== null;
   function clearFilters() { setFilterYear(null); setFilterMonth(null); setFilterTags([]); setFilterAuthor(null); setActiveTagColId(null); }
 
-  // Navigationsklick → aktive Tagsammlung zurücksetzen
-  const activeTagColIdRef = useRefA(null);
-  activeTagColIdRef.current = activeTagColId;
-  const navResetDone = useRefA(false);
-  useEffectA(() => {
-    if (!navResetDone.current) { navResetDone.current = true; return; } // initial mount überspringen
-    if (activeTagColIdRef.current) clearFilters();
-  }, [route, area]);
+  // Navigation-Wrapper: beim echten Navigationsklick aktive Tagsammlung löschen
+  function navigate(newRoute) {
+    if (activeTagColId) clearFilters();
+    setRoute(newRoute);
+  }
+  function navigateArea(newArea) {
+    if (activeTagColId) clearFilters();
+    setArea(newArea);
+  }
 
   const [openAsset, setOpenAsset] = useStateA(null);
   const [openPeers, setOpenPeers] = useStateA(null);
@@ -1266,6 +1285,8 @@ function App() {
   const [tagCollections, setTagCollections] = useStateA([]);
   const [activeTagColId, setActiveTagColId] = useStateA(null);
   const [dbReady, setDbReady] = useStateA(false);
+  // „Als User anzeigen"-Simulation (Rechte-Test) — triggert Re-Render bei Wechsel
+  const ppViewAsState = window.usePpViewAs ? window.usePpViewAs() : null;
 
   // Keep window globals in sync so views that read them directly stay current
   useEffectA(() => { window.currentArea = area; }, [area]);
@@ -1627,20 +1648,26 @@ function App() {
     return <window.LoginScreen tenantId={window.TENANT_ID} />;
   }
 
+  // Rechte-Simulation: im „Als User anzeigen"-Modus nur sichtbare Inhalte durchreichen.
+  const visibleAssets       = window.ppFilterAssets  ? window.ppFilterAssets(assets)        : assets;
+  const visibleImageFolders = window.ppFilterFolders ? window.ppFilterFolders(imageFolders) : imageFolders;
+  const visiblePdfFolders   = window.ppFilterFolders ? window.ppFilterFolders(pdfFolders)   : pdfFolders;
+
   return (
     <window.LangCtx.Provider value={{ lang, setLang, t }}>
      <window.FavCtx.Provider value={{ favorites, toggleFavorite, bulkSetFavorite }}>
       {window.isImpersonating?.() && (
         <window.ImpersonationBanner tenantId={window.TENANT_ID} />
       )}
+      {window.ViewAsBanner && <window.ViewAsBanner lang={lang} />}
       {route === "external" ? (
         <window.ExternalShareView onExit={() => setRoute("favorites")} lang={lang} />
       ) : (
         <div className="app" style={{ gridTemplateColumns: `${sidebarCollapsed ? 48 : sidebarWidth}px 1fr`, ...(window.isImpersonating?.() ? { paddingTop: 36 } : {}) }}>
           <Sidebar
-            area={area} setArea={setArea}
+            area={area} setArea={navigateArea}
             folders={folders}
-            route={route} setRoute={setRoute}
+            route={route} setRoute={navigate}
             lang={lang}
             onUpload={() => setUploadOpen(true)}
             onCreateFolder={createFolder}
@@ -1652,8 +1679,8 @@ function App() {
             onMoveFolder={moveFolderParent}
             onPinFolder={pinFolder}
             onDevOpen={() => setDevOpen(true)}
-            assets={assets}
-            currentUser={user}
+            assets={visibleAssets}
+            currentUser={enrichedUser || user}
             companyName={companyName}
             onSignOut={signOut}
             tagCollections={tagCollections}
@@ -1667,7 +1694,7 @@ function App() {
             theme={theme}
           />
           <div className="main">
-            <Topbar lang={lang} setLang={setLang} theme={theme} setTheme={setTheme} query={query} setQuery={setQuery} assets={assets} area={area} filterYear={filterYear} setFilterYear={setFilterYear} filterMonth={filterMonth} setFilterMonth={setFilterMonth} filterTags={filterTags} setFilterTags={setFilterTags} filterAuthor={filterAuthor} setFilterAuthor={setFilterAuthor} onClearFilters={clearFilters} onSaveFilters={saveTagCollection} />
+            <Topbar lang={lang} setLang={setLang} theme={theme} setTheme={setTheme} query={query} setQuery={setQuery} assets={visibleAssets} area={area} filterYear={filterYear} setFilterYear={setFilterYear} filterMonth={filterMonth} setFilterMonth={setFilterMonth} filterTags={filterTags} setFilterTags={setFilterTags} filterAuthor={filterAuthor} setFilterAuthor={setFilterAuthor} onClearFilters={clearFilters} onSaveFilters={saveTagCollection} />
             <div className="content scroll" ref={contentRef}>
               {!dbReady && (
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "60vh" }}>
@@ -1676,40 +1703,40 @@ function App() {
               )}
               {/* Global search / filter — overrides current route */}
               {dbReady && (query || hasFilter) && (
-                <window.RecentUploadsView assets={assets} area={area} lang={lang} query={query} filterYear={filterYear} filterMonth={filterMonth} filterTags={filterTags} filterAuthor={filterAuthor} onOpenAsset={openAssetWith} onOpenFolder={openFolder} onShareTarget={setShareTarget} onDeleteAssets={deleteAssets} onBulkAddTag={bulkAddTag} onBulkSetAuthor={bulkSetAuthor} onBulkMoveAssets={bulkMoveAssets} imageFolders={imageFolders} pdfFolders={pdfFolders} />
+                <window.RecentUploadsView assets={visibleAssets} area={area} lang={lang} query={query} filterYear={filterYear} filterMonth={filterMonth} filterTags={filterTags} filterAuthor={filterAuthor} onOpenAsset={openAssetWith} onOpenFolder={openFolder} onShareTarget={setShareTarget} onDeleteAssets={deleteAssets} onBulkAddTag={bulkAddTag} onBulkSetAuthor={bulkSetAuthor} onBulkMoveAssets={bulkMoveAssets} imageFolders={visibleImageFolders} pdfFolders={visiblePdfFolders} />
               )}
               {dbReady && !query && !hasFilter && baseRoute === "recent" && (
-                <window.RecentView area={area} assets={assets} folders={imageFolders} pdfFolders={pdfFolders} sharedLinks={sharedLinks} currentUser={user} onOpenFolder={openFolder} onOpenAsset={openAssetWith} onShareTarget={setShareTarget} onDeleteAssets={deleteAssets} onBulkAddTag={bulkAddTag} onBulkSetAuthor={bulkSetAuthor} onBulkMoveAssets={bulkMoveAssets} lang={lang} />
+                <window.RecentView area={area} assets={visibleAssets} folders={visibleImageFolders} pdfFolders={visiblePdfFolders} sharedLinks={sharedLinks} currentUser={enrichedUser || user} onOpenFolder={openFolder} onOpenAsset={openAssetWith} onShareTarget={setShareTarget} onDeleteAssets={deleteAssets} onBulkAddTag={bulkAddTag} onBulkSetAuthor={bulkSetAuthor} onBulkMoveAssets={bulkMoveAssets} lang={lang} />
               )}
               {dbReady && !query && !hasFilter && baseRoute === "favorites" && (
-                <window.FavoritesView assets={assets} area={area} lang={lang} onOpenAsset={openAssetWith} onOpenFolder={openFolder} onShareTarget={setShareTarget} query={query} onDeleteAssets={deleteAssets} onBulkAddTag={bulkAddTag} onBulkSetAuthor={bulkSetAuthor} onBulkMoveAssets={bulkMoveAssets} imageFolders={imageFolders} pdfFolders={pdfFolders} />
+                <window.FavoritesView assets={visibleAssets} area={area} lang={lang} onOpenAsset={openAssetWith} onOpenFolder={openFolder} onShareTarget={setShareTarget} query={query} onDeleteAssets={deleteAssets} onBulkAddTag={bulkAddTag} onBulkSetAuthor={bulkSetAuthor} onBulkMoveAssets={bulkMoveAssets} imageFolders={visibleImageFolders} pdfFolders={visiblePdfFolders} />
               )}
               {dbReady && !query && !hasFilter && baseRoute === "uploads" && (
-                <window.RecentUploadsView assets={assets} area={area} lang={lang} query={query} onOpenAsset={openAssetWith} onOpenFolder={openFolder} onShareTarget={setShareTarget} onDeleteAssets={deleteAssets} onBulkAddTag={bulkAddTag} onBulkSetAuthor={bulkSetAuthor} onBulkMoveAssets={bulkMoveAssets} imageFolders={imageFolders} pdfFolders={pdfFolders} />
+                <window.RecentUploadsView assets={visibleAssets} area={area} lang={lang} query={query} onOpenAsset={openAssetWith} onOpenFolder={openFolder} onShareTarget={setShareTarget} onDeleteAssets={deleteAssets} onBulkAddTag={bulkAddTag} onBulkSetAuthor={bulkSetAuthor} onBulkMoveAssets={bulkMoveAssets} imageFolders={visibleImageFolders} pdfFolders={visiblePdfFolders} />
               )}
               {dbReady && !query && !hasFilter && baseRoute === "all" && (
-                <window.AllAssetsView assets={assets} area={area} lang={lang} onOpenAsset={openAssetWith} onShareTarget={setShareTarget} query={query} onDeleteAssets={deleteAssets} onBulkAddTag={bulkAddTag} onBulkSetAuthor={bulkSetAuthor} onBulkMoveAssets={bulkMoveAssets} imageFolders={imageFolders} pdfFolders={pdfFolders} />
+                <window.AllAssetsView assets={visibleAssets} area={area} lang={lang} onOpenAsset={openAssetWith} onShareTarget={setShareTarget} query={query} onDeleteAssets={deleteAssets} onBulkAddTag={bulkAddTag} onBulkSetAuthor={bulkSetAuthor} onBulkMoveAssets={bulkMoveAssets} imageFolders={visibleImageFolders} pdfFolders={visiblePdfFolders} />
               )}
               {dbReady && !query && !hasFilter && baseRoute === "folders" && !detailId && (
-                <window.FoldersView folders={imageFolders} kind="image" lang={lang} onOpenFolder={openFolder} onCreateNew={() => setUploadOpen(true)} onMoveAssets={bulkMoveAssets} />
+                <window.FoldersView folders={visibleImageFolders} kind="image" lang={lang} onOpenFolder={openFolder} onCreateNew={() => setUploadOpen(true)} onMoveAssets={bulkMoveAssets} />
               )}
               {dbReady && !query && !hasFilter && baseRoute === "folders" && currentFolder && (
-                <window.FolderDetailView assets={assets} folder={currentFolder} kind="image" lang={lang} onBack={() => setRoute("folders")} onOpenFolder={openFolder} onOpenAsset={openAssetWith} onShareTarget={setShareTarget} onUpload={() => setUploadOpen(true)} onDeleteAssets={deleteAssets} onBulkAddTag={bulkAddTag} onBulkSetAuthor={bulkSetAuthor} onBulkMoveAssets={bulkMoveAssets} imageFolders={imageFolders} pdfFolders={pdfFolders} />
+                <window.FolderDetailView assets={visibleAssets} folder={currentFolder} kind="image" lang={lang} onBack={() => setRoute("folders")} onOpenFolder={openFolder} onOpenAsset={openAssetWith} onShareTarget={setShareTarget} onUpload={() => setUploadOpen(true)} onDeleteAssets={deleteAssets} onBulkAddTag={bulkAddTag} onBulkSetAuthor={bulkSetAuthor} onBulkMoveAssets={bulkMoveAssets} imageFolders={visibleImageFolders} pdfFolders={visiblePdfFolders} />
               )}
               {dbReady && !query && !hasFilter && baseRoute === "pdfs" && !detailId && (
-                <window.FoldersView folders={pdfFolders.filter(f => !f.category || f.category === "kampagne")} kind="pdf" lang={lang} onOpenFolder={openFolder} onCreateNew={() => setUploadOpen(true)} onMoveAssets={bulkMoveAssets} />
+                <window.FoldersView folders={visiblePdfFolders.filter(f => !f.category || f.category === "kampagne")} kind="pdf" lang={lang} onOpenFolder={openFolder} onCreateNew={() => setUploadOpen(true)} onMoveAssets={bulkMoveAssets} />
               )}
               {dbReady && !query && !hasFilter && baseRoute === "pdfs" && currentFolder && (
-                <window.FolderDetailView assets={assets} folder={currentFolder} kind="pdf" lang={lang} onBack={() => setRoute("pdfs")} onOpenFolder={openFolder} onOpenAsset={openAssetWith} onShareTarget={setShareTarget} onUpload={() => setUploadOpen(true)} onDeleteAssets={deleteAssets} onBulkAddTag={bulkAddTag} onBulkSetAuthor={bulkSetAuthor} onBulkMoveAssets={bulkMoveAssets} imageFolders={imageFolders} pdfFolders={pdfFolders} />
+                <window.FolderDetailView assets={visibleAssets} folder={currentFolder} kind="pdf" lang={lang} onBack={() => setRoute("pdfs")} onOpenFolder={openFolder} onOpenAsset={openAssetWith} onShareTarget={setShareTarget} onUpload={() => setUploadOpen(true)} onDeleteAssets={deleteAssets} onBulkAddTag={bulkAddTag} onBulkSetAuthor={bulkSetAuthor} onBulkMoveAssets={bulkMoveAssets} imageFolders={visibleImageFolders} pdfFolders={visiblePdfFolders} />
               )}
               {dbReady && !query && !hasFilter && baseRoute === "literatur" && !detailId && (
-                <window.FoldersView folders={pdfFolders.filter(f => f.category === "literatur")} kind="pdf" lang={lang} onOpenFolder={openFolder} onCreateNew={() => setUploadOpen(true)} onMoveAssets={bulkMoveAssets} />
+                <window.FoldersView folders={visiblePdfFolders.filter(f => f.category === "literatur")} kind="pdf" lang={lang} onOpenFolder={openFolder} onCreateNew={() => setUploadOpen(true)} onMoveAssets={bulkMoveAssets} />
               )}
               {dbReady && !query && !hasFilter && baseRoute === "literatur" && currentFolder && (
-                <window.FolderDetailView assets={assets} folder={currentFolder} kind="pdf" lang={lang} onBack={() => setRoute("literatur")} onOpenFolder={openFolder} onOpenAsset={openAssetWith} onShareTarget={setShareTarget} onUpload={() => setUploadOpen(true)} onDeleteAssets={deleteAssets} onBulkAddTag={bulkAddTag} onBulkSetAuthor={bulkSetAuthor} onBulkMoveAssets={bulkMoveAssets} imageFolders={imageFolders} pdfFolders={pdfFolders} />
+                <window.FolderDetailView assets={visibleAssets} folder={currentFolder} kind="pdf" lang={lang} onBack={() => setRoute("literatur")} onOpenFolder={openFolder} onOpenAsset={openAssetWith} onShareTarget={setShareTarget} onUpload={() => setUploadOpen(true)} onDeleteAssets={deleteAssets} onBulkAddTag={bulkAddTag} onBulkSetAuthor={bulkSetAuthor} onBulkMoveAssets={bulkMoveAssets} imageFolders={visibleImageFolders} pdfFolders={visiblePdfFolders} />
               )}
-              {dbReady && !query && !hasFilter && baseRoute === "tags" && <window.TagsView assets={assets} tags={tags} onSaveTag={saveTag} onDeleteTag={deleteTag} onOpenAsset={openAssetWith} lang={lang} />}
-              {!query && !hasFilter && baseRoute === "shared" && <window.SharedView onOpenShare={() => setRoute("external")} lang={lang} />}
+              {dbReady && !query && !hasFilter && baseRoute === "tags" && <window.TagsView assets={visibleAssets} tags={tags} onSaveTag={saveTag} onDeleteTag={deleteTag} onOpenAsset={openAssetWith} lang={lang} />}
+              {!query && !hasFilter && baseRoute === "shared" && <window.SharedView onOpenShare={() => setRoute("external")} onReopen={(sl) => setShareTarget({ existing: sl })} lang={lang} />}
               {!query && !hasFilter && baseRoute === "admin" && user?.email === window.SUPERADMIN_EMAIL && (
                 <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
                   <window.AdminView lang={lang} />
@@ -1762,6 +1789,12 @@ class AppErrorBoundary extends React.Component {
   }
   componentDidCatch(error, info) {
     console.error("[picpop] Render error:", error, info.componentStack);
+    this.setState({ stack: info.componentStack });
+    // Check which window.* components are undefined
+    const keys = ['LangCtx','FavCtx','LoginScreen','ImpersonationBanner','ExternalShareView','AssetDetailModal','UploadModal','ShareDialog','Toast','DevPanel','AdminView','SettingsView','RecentView','FavoritesView','AllAssetsView','FolderDetailView','SharedView','BulkBar','SectionHeader','AssetTile','Icon'];
+    const missing = keys.filter(k => !window[k]);
+    if (missing.length) console.error("[picpop] Missing window components:", missing);
+    this.setState({ missing });
   }
   render() {
     if (this.state.error) {
@@ -1774,6 +1807,8 @@ class AppErrorBoundary extends React.Component {
           <div style={{ fontSize: 28, fontWeight: 600, marginBottom: 16 }}>picpop — Fehler</div>
           <div style={{ color: "#f87171", fontFamily: "Geist Mono, monospace", fontSize: 13, maxWidth: 700, whiteSpace: "pre-wrap", background: "#1a0808", padding: 20, borderRadius: 8, border: "1px solid #f8717133" }}>
             {String(this.state.error)}
+            {this.state.missing?.length > 0 && `\n\n⚠ Fehlende window.*-Komponenten:\n${this.state.missing.join(', ')}`}
+            {this.state.stack && `\n\nComponent stack:${this.state.stack.slice(0, 600)}`}
           </div>
           <button
             onClick={() => { this.setState({ error: null }); }}

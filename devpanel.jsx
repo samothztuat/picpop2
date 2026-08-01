@@ -266,6 +266,175 @@ function dpFmtDate(iso) {
   return d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: '2-digit' });
 }
 
+// ── Foto-Attribute Batch (eigene Komponente für eigenen State) ─────────────
+function AttrsBatchSection() {
+  const { useState: useStateAB, useRef: useRefAB } = React;
+  const [status, setStatus]     = useStateAB('idle');
+  const [log, setLog]           = useStateAB([]);
+  const [progress, setProgress] = useStateAB({ done: 0, total: 0, errors: 0 });
+  const stopRef                 = useRefAB(false);
+  const logRef                  = useRefAB(null);
+  const colMap = { info: 'var(--fg-2)', success: '#5cc9a3', warn: '#ebc745', error: '#f05e69' };
+
+  function addLog(msg, type = 'info') {
+    setLog(prev => [...prev, { msg, type }]);
+    setTimeout(() => { if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight; }, 50);
+  }
+
+  async function runAttrsBatch(forceOverwrite = false) {
+    if (status === 'running') { stopRef.current = true; return; }
+    stopRef.current = false;
+    setLog([]); setStatus('running'); setProgress({ done: 0, total: 0, errors: 0 });
+    try {
+      await window.loadAiConfig();
+      if (!window.AI_CONFIG?.openaiKey) {
+        addLog('⚠ Kein OpenAI-Key — bitte in den Einstellungen hinterlegen.', 'error');
+        setStatus('error'); return;
+      }
+      addLog(forceOverwrite ? 'Lade alle Fotos…' : 'Lade Fotos ohne Foto-Attribute…');
+      const snap = await window.tenantCol('assets').get();
+      const todo = snap.docs.map(d => d.data())
+        .filter(a => a.storageUrl && a.kind !== 'pdf' && a.area !== 'print')
+        .filter(a => forceOverwrite || !a.photoAttrs?.length);
+      addLog(`${todo.length} Fotos ${forceOverwrite ? 'gesamt' : 'ohne Attribute'}`);
+      setProgress({ done: 0, total: todo.length, errors: 0 });
+      if (todo.length === 0) { addLog('✓ Fertig.', 'success'); setStatus('done'); return; }
+      let done = 0, errors = 0;
+      for (const asset of todo) {
+        if (stopRef.current) { addLog('— Abgebrochen.', 'warn'); break; }
+        addLog(`→ ${asset.title || asset.id}`);
+        try {
+          const attrs = await window.analyzePhotoAttrsWithAI(asset.storageUrl, asset.ratio);
+          if (attrs?.length) {
+            await window.tenantCol('assets').doc(asset.id).update({ photoAttrs: attrs });
+            addLog(`  ✓ ${attrs.join(' · ')}`, 'success');
+          } else {
+            addLog(`  ○ Keine Attribute erkannt.`, 'warn');
+          }
+        } catch (e) {
+          errors++;
+          addLog(`  ✗ ${e.message}`, 'error');
+        }
+        done++;
+        setProgress({ done, total: todo.length, errors });
+        await new Promise(r => setTimeout(r, 400));
+      }
+      addLog(`\nFertig — ${done} verarbeitet, ${errors} Fehler.`, errors === 0 ? 'success' : 'warn');
+      setStatus('done');
+    } catch (e) {
+      addLog(`✗ ${e.message}`, 'error');
+      setStatus('error');
+    }
+  }
+
+  const pct = progress.total > 0 ? Math.round((progress.done / progress.total) * 100) : 0;
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+        <button className={'btn' + (status === 'running' ? ' ghost' : ' primary')} onClick={() => status === 'running' ? runAttrsBatch() : runAttrsBatch(false)} style={{ minWidth: 180 }}>
+          {status === 'running' ? '⏹ Stoppen' : '▶ Fehlende analysieren'}
+        </button>
+        {status !== 'running' && (
+          <button className="btn" onClick={() => runAttrsBatch(true)} style={{ minWidth: 180 }} title="Überschreibt vorhandene Attribute">
+            ↺ Alle neu analysieren
+          </button>
+        )}
+        {progress.total > 0 && <span style={{ fontSize: 12, color: 'var(--muted)', fontFamily: 'var(--font-mono)' }}>{progress.done} / {progress.total} ({pct}%) · {progress.errors} Fehler</span>}
+      </div>
+      {progress.total > 0 && (
+        <div style={{ height: 4, background: 'var(--line)', borderRadius: 2, overflow: 'hidden' }}>
+          <div style={{ height: '100%', width: pct + '%', background: progress.errors > 0 ? '#ebc745' : '#5cc9a3', transition: 'width 0.3s', borderRadius: 2 }} />
+        </div>
+      )}
+      {log.length > 0 && (
+        <div ref={logRef} style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 6, padding: '12px 16px', fontFamily: 'var(--font-mono)', fontSize: 11, lineHeight: 1.7, maxHeight: 300, overflowY: 'auto' }}>
+          {log.map((l, i) => <div key={i} style={{ color: colMap[l.type] || 'var(--fg-2)', whiteSpace: 'pre-wrap' }}>{l.msg}</div>)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Thumbnail-Batch (Performance: kleine Vorschaubilder für schnelles Grid) ──
+function ThumbBatchSection() {
+  const { useState: useStateTB, useRef: useRefTB } = React;
+  const [status, setStatus]     = useStateTB('idle');
+  const [log, setLog]           = useStateTB([]);
+  const [progress, setProgress] = useStateTB({ done: 0, total: 0, errors: 0, saved: 0 });
+  const stopRef                 = useRefTB(false);
+  const logRef                  = useRefTB(null);
+  const colMap = { info: 'var(--fg-2)', success: '#5cc9a3', warn: '#ebc745', error: '#f05e69' };
+
+  function addLog(msg, type = 'info') {
+    setLog(prev => [...prev, { msg, type }]);
+    setTimeout(() => { if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight; }, 50);
+  }
+
+  async function runThumbBatch(forceAll = false) {
+    if (status === 'running') { stopRef.current = true; return; }
+    stopRef.current = false;
+    setLog([]); setStatus('running'); setProgress({ done: 0, total: 0, errors: 0, saved: 0 });
+    try {
+      addLog(forceAll ? 'Lade alle Bilder…' : 'Lade Bilder ohne Thumbnail…');
+      const snap = await window.tenantCol('assets').get();
+      const todo = snap.docs.map(d => d.data())
+        .filter(a => a.storageUrl && a.kind !== 'pdf')
+        .filter(a => forceAll || !a.thumbnailUrl);
+      addLog(`${todo.length} Bilder ${forceAll ? 'gesamt' : 'ohne Thumbnail'}`);
+      setProgress({ done: 0, total: todo.length, errors: 0, saved: 0 });
+      if (todo.length === 0) { addLog('✓ Alle Bilder haben bereits ein Thumbnail.', 'success'); setStatus('done'); return; }
+      let done = 0, errors = 0, savedBytes = 0;
+      for (const asset of todo) {
+        if (stopRef.current) { addLog('— Abgebrochen.', 'warn'); break; }
+        addLog(`→ ${asset.title || asset.id}`);
+        try {
+          const r = await window.regenerateThumbnail(asset, 800);
+          savedBytes += r.bytes || 0;
+          addLog(`  ✓ ${Math.round((r.bytes || 0) / 1024)} KB`, 'success');
+        } catch (e) {
+          errors++;
+          addLog(`  ✗ ${e.message}`, 'error');
+        }
+        done++;
+        setProgress({ done, total: todo.length, errors, saved: savedBytes });
+        await new Promise(r => setTimeout(r, 120));
+      }
+      addLog(`\nFertig — ${done} verarbeitet, ${errors} Fehler.`, errors === 0 ? 'success' : 'warn');
+      setStatus('done');
+    } catch (e) {
+      addLog(`✗ ${e.message}`, 'error');
+      setStatus('error');
+    }
+  }
+
+  const pct = progress.total > 0 ? Math.round((progress.done / progress.total) * 100) : 0;
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+        <button className={'btn' + (status === 'running' ? ' ghost' : ' primary')} onClick={() => status === 'running' ? runThumbBatch() : runThumbBatch(false)} style={{ minWidth: 180 }}>
+          {status === 'running' ? '⏹ Stoppen' : '▶ Fehlende erzeugen'}
+        </button>
+        {status !== 'running' && (
+          <button className="btn" onClick={() => runThumbBatch(true)} style={{ minWidth: 180 }} title="Erzeugt alle Thumbnails neu (auch vorhandene, z. B. um große alte zu verkleinern)">
+            ↺ Alle neu erzeugen
+          </button>
+        )}
+        {progress.total > 0 && <span style={{ fontSize: 12, color: 'var(--muted)', fontFamily: 'var(--font-mono)' }}>{progress.done} / {progress.total} ({pct}%) · {progress.errors} Fehler</span>}
+      </div>
+      {progress.total > 0 && (
+        <div style={{ height: 4, background: 'var(--line)', borderRadius: 2, overflow: 'hidden' }}>
+          <div style={{ height: '100%', width: pct + '%', background: progress.errors > 0 ? '#ebc745' : '#5cc9a3', transition: 'width 0.3s', borderRadius: 2 }} />
+        </div>
+      )}
+      {log.length > 0 && (
+        <div ref={logRef} style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 6, padding: '12px 16px', fontFamily: 'var(--font-mono)', fontSize: 11, lineHeight: 1.7, maxHeight: 300, overflowY: 'auto' }}>
+          {log.map((l, i) => <div key={i} style={{ color: colMap[l.type] || 'var(--fg-2)', whiteSpace: 'pre-wrap' }}>{l.msg}</div>)}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── KI-Batch Tab ──────────────────────────────────────────────────────────
 
 function KiBatchTab() {
@@ -429,6 +598,27 @@ function KiBatchTab() {
           ))}
         </div>
       )}
+
+      {/* ── Foto-Attribute Batch ── */}
+      <div style={{ borderTop: '1px solid var(--line)', paddingTop: 20 }}>
+        <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 4 }}>Foto-Attribute generieren</div>
+        <div style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.7, marginBottom: 12 }}>
+          <strong>Nur Fotos</strong> (kein Print, kein PDF) — analysiert Bildausschnitt, Perspektive, Optik,<br/>
+          Tiefenschärfe, Licht, Stimmung. Orientierung wird aus Seitenverhältnis abgeleitet.
+        </div>
+        <AttrsBatchSection />
+      </div>
+
+      {/* ── Thumbnail Batch (Performance) ── */}
+      <div style={{ borderTop: '1px solid var(--line)', paddingTop: 20 }}>
+        <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 4 }}>Vorschaubilder (Thumbnails) erzeugen</div>
+        <div style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.7, marginBottom: 12 }}>
+          Erzeugt kleine <strong>800px-Vorschaubilder</strong> fürs Raster. Bilder <strong>ohne</strong> Thumbnail
+          laden sonst die volle Auflösung (oft &gt;10&nbsp;MB) — das macht die Galerie langsam.<br/>
+          „Fehlende erzeugen" rüstet Bestandsbilder nach · „Alle neu erzeugen" verkleinert auch vorhandene.
+        </div>
+        <ThumbBatchSection />
+      </div>
     </div>
   );
 }

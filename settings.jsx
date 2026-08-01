@@ -148,6 +148,23 @@ function SettingsView({ lang, setLang, theme, setTheme, density, setDensity, tea
   const [tagNewForm, setTagNewForm] = useStateS({ name: "", name_en: "" });
   const [tagDeleteConfirm, setTagDeleteConfirm] = useStateS(null);
 
+  /* ── Deploy ── */
+  const [deployState, setDeployState] = useStateS('idle'); // idle|running|success|error
+  const [deployLog,   setDeployLog]   = useStateS('');
+  async function runDeploy() {
+    if (deployState === 'running') return;
+    setDeployState('running'); setDeployLog('');
+    try {
+      const res = await fetch('http://localhost:8080/api/deploy', { method: 'POST' });
+      const data = await res.json();
+      if (data.ok) { setDeployState('success'); setDeployLog(data.output || ''); }
+      else          { setDeployState('error');   setDeployLog(data.error  || (lang === 'de' ? 'Deploy fehlgeschlagen' : 'Deploy failed')); }
+    } catch (_) {
+      setDeployState('error');
+      setDeployLog(lang === 'de' ? 'Netzwerkfehler — läuft der Dev-Server? (node server.js)' : 'Network error — is the dev server running? (node server.js)');
+    }
+  }
+
   /* ── GitHub ── */
   const [ghDraft,     setGhDraft]     = useStateS({ token: "", repo: "", branch: "main" });
   const [ghSaved,     setGhSaved]     = useStateS({ token: "", repo: "", branch: "main" });
@@ -187,7 +204,10 @@ function SettingsView({ lang, setLang, theme, setTheme, density, setDensity, tea
           const keys = d.llmProviderKeys || {};
           setProviderKeys(keys);
           setKeyDrafts(keys);
-          if (d.aiPrompt) { setAiPrompt(d.aiPrompt); setAiPromptDraft(d.aiPrompt); window.AI_CONFIG = window.AI_CONFIG || {}; window.AI_CONFIG.prompt = d.aiPrompt; }
+          // Sync OpenAI key + prompt to window.AI_CONFIG so uploadAsset always has the latest key
+          window.AI_CONFIG = window.AI_CONFIG || {};
+          window.AI_CONFIG.openaiKey = keys.openai || "";
+          if (d.aiPrompt) { setAiPrompt(d.aiPrompt); setAiPromptDraft(d.aiPrompt); window.AI_CONFIG.prompt = d.aiPrompt; }
           if (d.accentHue) setAccentHue(d.accentHue);
           if (d.github) {
             const g = d.github;
@@ -518,6 +538,8 @@ function SettingsView({ lang, setLang, theme, setTheme, density, setDensity, tea
   });
 
   /* ── Render ── */
+  // Technische/Admin-Bereiche nur für Superadmin (und nicht im „Als User anzeigen"-Modus)
+  const seesTechnik = window.CURRENT_USER?.email === window.SUPERADMIN_EMAIL && !window.ppViewAs?.();
   return (
     <div style={{ padding: "32px 40px 80px", overflow: "auto", flex: 1, display: "flex", flexDirection: "column", gap: 48, maxWidth: 900 }}>
 
@@ -609,6 +631,7 @@ function SettingsView({ lang, setLang, theme, setTheme, density, setDensity, tea
       </section>
 
       {/* ══ 2 · Datenbankverbindung ═════════════════════════════════════════ */}
+      {seesTechnik && (
       <section>
         <SectionLabel>{lang === "de" ? "Datenbankverbindung" : "Database connection"}</SectionLabel>
         <div style={{ ...card }}>
@@ -684,8 +707,10 @@ function SettingsView({ lang, setLang, theme, setTheme, density, setDensity, tea
           </div>
         </div>
       </section>
+      )}
 
       {/* ══ 3 · GitHub · Versionskontrolle ══════════════════════════════════ */}
+      {seesTechnik && (
       <section>
         <SectionLabel>GitHub · {lang === "de" ? "Versionskontrolle" : "Version control"}</SectionLabel>
 
@@ -921,8 +946,10 @@ function SettingsView({ lang, setLang, theme, setTheme, density, setDensity, tea
             : "The PAT requires repo (read/write) permissions. Images in Firebase Storage are not migrated, only metadata."}
         </div>
       </section>
+      )}
 
       {/* ══ 3b · Deployment & Infrastruktur ════════════════════════════════ */}
+      {seesTechnik && (
       <section>
         <SectionLabel>{lang === "de" ? "Deployment & Infrastruktur" : "Deployment & Infrastructure"}</SectionLabel>
 
@@ -942,14 +969,39 @@ function SettingsView({ lang, setLang, theme, setTheme, density, setDensity, tea
                 picpop-bilddatenbank.web.app &nbsp;·&nbsp; picpop-bilddatenbank.firebaseapp.com
               </div>
             </div>
-            <a href="https://picpop-bilddatenbank.web.app" target="_blank" rel="noreferrer"
-              style={{ all: "unset", cursor: "pointer", padding: "6px 14px", border: "1px solid var(--line-strong)", fontSize: 12, color: "var(--muted)", whiteSpace: "nowrap" }}
-              onMouseEnter={e => { e.currentTarget.style.background = "var(--hover)"; e.currentTarget.style.color = "var(--fg)"; }}
-              onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--muted)"; }}
-            >
-              {lang === "de" ? "Live öffnen ↗" : "Open live ↗"}
-            </a>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+              <a href="https://picpop-bilddatenbank.web.app" target="_blank" rel="noreferrer"
+                style={{ all: "unset", cursor: "pointer", padding: "6px 14px", border: "1px solid var(--line-strong)", fontSize: 12, color: "var(--muted)", whiteSpace: "nowrap" }}
+                onMouseEnter={e => { e.currentTarget.style.background = "var(--hover)"; e.currentTarget.style.color = "var(--fg)"; }}
+                onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--muted)"; }}
+              >
+                {lang === "de" ? "Live öffnen ↗" : "Open live ↗"}
+              </a>
+              <button
+                onClick={runDeploy}
+                disabled={deployState === 'running'}
+                style={{ all: "unset", cursor: deployState === 'running' ? "not-allowed" : "pointer", padding: "6px 14px", fontSize: 12, fontWeight: 500, whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: 6, opacity: deployState === 'running' ? 0.6 : 1, transition: "background 120ms",
+                  background: deployState === 'success' ? "oklch(0.45 0.13 145)" : deployState === 'error' ? "oklch(0.52 0.18 25)" : "var(--fg)",
+                  color: "var(--bg)" }}
+                title={lang === "de" ? "firebase deploy --only hosting" : "firebase deploy --only hosting"}
+              >
+                {deployState === 'running' && (
+                  <svg width="12" height="12" viewBox="0 0 24 24" style={{ animation: "spin 1s linear infinite" }}>
+                    <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" fill="none" strokeDasharray="40 20" />
+                  </svg>
+                )}
+                {deployState === 'idle'    && (lang === "de" ? "🚀 Deployen" : "🚀 Deploy")}
+                {deployState === 'running' && (lang === "de" ? "Deployt…"   : "Deploying…")}
+                {deployState === 'success' && "✓ Deployed"}
+                {deployState === 'error'   && "↻ Retry"}
+              </button>
+            </div>
           </div>
+          {(deployState === 'success' || deployState === 'error') && deployLog && (
+            <div style={{ padding: "10px 24px", background: "var(--bg)", borderBottom: "1px solid var(--line)", fontSize: 11, fontFamily: "var(--font-mono)", color: deployState === 'success' ? "oklch(0.40 0.12 145)" : "oklch(0.50 0.14 25)", lineHeight: 1.5, whiteSpace: "pre-wrap", maxHeight: 120, overflowY: "auto" }}>
+              {deployLog.split('\n').slice(-15).join('\n')}
+            </div>
+          )}
 
           <div style={{ padding: "20px 24px", display: "flex", flexDirection: "column", gap: 16 }}>
 
@@ -1057,8 +1109,10 @@ jobs:
             : "picpop uses two independent versioning layers: (1) Source code via Git/GitHub — commits of JSX/HTML files, restorable via Dev Panel. (2) Firestore data via GitHub API — JSON snapshots of all assets, tags and folders, restorable via Pull above."}
         </div>
       </section>
+      )}
 
-      {/* ══ 4 · KI-Konfiguration ════════════════════════════════════════════ */}
+      {/* ══ 4 · KI-Konfiguration (API-Schlüssel — nur Superadmin) ═══════════ */}
+      {seesTechnik && (
       <section>
         <SectionLabel>{lang === "de" ? "KI-Konfiguration" : "AI configuration"}</SectionLabel>
         <div style={{ marginBottom: 12, fontSize: 12, color: "var(--muted)", lineHeight: 1.6 }}>
@@ -1205,6 +1259,20 @@ jobs:
           </div>
         </div>
       </section>
+      )}
+
+      {/* ══ Benutzer & Gruppen (nur Superadmin / Mandanten-Admin) ═════════════ */}
+      {(window.CURRENT_USER?.email === window.SUPERADMIN_EMAIL || window.PP_IS_ADMIN) && window.UserGroupsPanel && (
+        <section>
+          <SectionLabel>{lang === "de" ? "Benutzer & Gruppen" : "Users & groups"}</SectionLabel>
+          <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 16, lineHeight: 1.6 }}>
+            {lang === "de"
+              ? "Bereiche gliedern die Inhalte, Gruppen vergeben je Bereich Rechte, Konten werden Gruppen zugeordnet. Zugriffsregeln werden serverseitig durchgesetzt."
+              : "Areas partition content, groups grant per-area rights, accounts are assigned to groups. Access is enforced server-side."}
+          </div>
+          <window.UserGroupsPanel lang={lang} />
+        </section>
+      )}
 
       {/* ══ 4 · Urheber ══════════════════════════════════════════════════════ */}
       <section>
@@ -1539,7 +1607,8 @@ jobs:
         })()}
       </section>
 
-      {/* ══ 6 · App-Info ════════════════════════════════════════════════════ */}
+      {/* ══ 6 · App-Info · Workspace (nur Superadmin) ═══════════════════════ */}
+      {seesTechnik && (
       <section>
         {/* ── Workspace / Tenant ───────────────────────────────────────────── */}
         <section style={{ marginBottom: 56 }}>
@@ -1607,6 +1676,7 @@ jobs:
           </div>
         </div>
       </section>
+      )}
 
     </div>
   );

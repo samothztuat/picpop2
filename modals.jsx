@@ -27,6 +27,9 @@ function AssetDetailModal({ open, asset: assetProp, peerAssets, onNavigate, onCl
   const [confirmDel, setConfirmDel] = useStateM(false);
   // AI description
   const [aiDesc, setAiDesc] = useStateM(asset?.aiDescription ?? "");
+  // Fotografische Attribute
+  const [photoAttrs, setPhotoAttrs] = useStateM(asset?.photoAttrs ?? []);
+  const [attrsLoading, setAttrsLoading] = useStateM(false);
 
   // Sync editing state when parent asset changes; also clear any pending localAsset
   useEffectM(() => {
@@ -35,6 +38,7 @@ function AssetDetailModal({ open, asset: assetProp, peerAssets, onNavigate, onCl
     setLocalAsset(null);
     setTags(assetProp.tags); setNotes(assetProp.notes || ""); setTitle(assetProp.title);
     setAiDesc(assetProp.aiDescription || "");
+    setPhotoAttrs(assetProp.photoAttrs || []);
     setShowTagPicker(false); setShowAuthorPicker(false);
     setNewTagName(""); setConfirmDel(false);
     if (assetProp?.widthMm && assetProp?.heightMm) {
@@ -511,6 +515,54 @@ function AssetDetailModal({ open, asset: assetProp, peerAssets, onNavigate, onCl
               </div>
             )}
 
+            {/* Fotografische Attribute — nur für Fotos (nicht PDF, nicht Print) */}
+            {asset.kind !== "pdf" && asset.area !== "print" && (
+              <div style={{ marginBottom: 16 }}>
+                <div className="row" style={{ gap: 6, marginBottom: 8, alignItems: "center" }}>
+                  <div className="eyebrow" style={{ marginBottom: 0 }}>
+                    {lang === "de" ? "Foto-Attribute" : "Photo attributes"}
+                  </div>
+                  <span style={{ fontSize: 10, fontWeight: 600, letterSpacing: "0.05em", padding: "1px 6px", background: "oklch(52% 0.17 145 / 0.1)", color: "oklch(40% 0.15 145)", border: "1px solid oklch(52% 0.17 145 / 0.2)", borderRadius: 3 }}>
+                    GPT-4o mini
+                  </span>
+                  {window.AI_CONFIG?.openaiKey && (
+                    <button
+                      className="btn sm ghost"
+                      disabled={attrsLoading}
+                      style={{ marginLeft: "auto", fontSize: 11, opacity: attrsLoading ? 0.5 : 1 }}
+                      onClick={async () => {
+                        if (!asset.storageUrl) return;
+                        setAttrsLoading(true);
+                        try {
+                          const attrs = await window.analyzePhotoAttrsWithAI?.(asset.storageUrl, asset.ratio);
+                          if (attrs) { setPhotoAttrs(attrs); save({ photoAttrs: attrs }); }
+                        } finally { setAttrsLoading(false); }
+                      }}
+                    >
+                      {attrsLoading ? "…" : (photoAttrs?.length ? "↺" : "✦")} {lang === "de" ? (photoAttrs?.length ? "Neu generieren" : "Generieren") : (photoAttrs?.length ? "Re-generate" : "Generate")}
+                    </button>
+                  )}
+                </div>
+                {photoAttrs?.length > 0 ? (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
+                    {photoAttrs.map((attr, i) => (
+                      <span key={i} style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "3px 9px", borderRadius: 3, fontSize: 11, background: "var(--hover)", color: "var(--fg-2)", border: "1px solid var(--line)", whiteSpace: "nowrap" }}>
+                        {attr}
+                        <button onClick={() => { const next = photoAttrs.filter((_, j) => j !== i); setPhotoAttrs(next); save({ photoAttrs: next }); }}
+                          style={{ all: "unset", cursor: "pointer", color: "var(--muted)", lineHeight: 1, fontSize: 12, marginLeft: 2 }}>×</button>
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  <div style={{ fontSize: 12, color: "var(--muted)", fontStyle: "italic" }}>
+                    {window.AI_CONFIG?.openaiKey
+                      ? (lang === "de" ? "Noch keine Attribute — \"Generieren\" klicken" : "No attributes yet — click \"Generate\"")
+                      : (lang === "de" ? "OpenAI-Key in den Einstellungen hinterlegen" : "Add OpenAI key in settings")}
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Notes */}
             <div style={{ marginBottom: 16 }}>
               <div className="eyebrow" style={{ marginBottom: 8 }}>{t("notes")}</div>
@@ -622,24 +674,69 @@ function ShareDialog({ open, target, onClose, onShared, lang }) {
   const [copied, setCopied] = useStateM(false);
   const [saving, setSaving] = useStateM(false);
   const [saved, setSaved] = useStateM(false);
+  const origRef = useRefM(null); // Ausgangswerte bei bestehendem Link (für „geändert?")
+  const [dirtyTick, setDirtyTick] = useStateM(0); // erzwingt Re-Render bei Settings-Änderung
+
+  // Bestehender Link (Klick in „Geteilte Links") vs. neuer Link
+  const existing = target?.existing || null;
 
   useEffectM(() => {
     if (!open || !target) return;
-    const s = (target.folder ? "f-" : "a-") + Math.random().toString(36).slice(2, 9);
-    setSlug(s);
     const base = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
       ? "https://picpop-bilddatenbank.web.app"
       : window.location.origin;
-    setLink(`${base}/s/${s}`);
+    if (existing) {
+      // Bestehenden Link „wieder rausholen" — Daten vorbefüllen, nicht neu anlegen
+      setSlug(existing.id);
+      setLink(`${base}/s/${existing.id}`);
+      setViewOnly(existing.viewOnly !== false);
+      setExpires(existing.expires || "");
+      setRecipients(existing.recipients || "");
+      setMessage(existing.message || "");
+      setSaved(true); // Link existiert bereits
+      origRef.current = {
+        viewOnly: existing.viewOnly !== false,
+        expires: existing.expires || "",
+        recipients: existing.recipients || "",
+        message: existing.message || "",
+      };
+    } else {
+      const s = (target.folder ? "f-" : "a-") + Math.random().toString(36).slice(2, 9);
+      setSlug(s);
+      setLink(`${base}/s/${s}`);
+      setSaved(false);
+      origRef.current = null;
+    }
     setCopied(false);
-    setSaved(false);
-  }, [open, target]);
+  }, [open, target]); // eslint-disable-line
 
   if (!target) return null;
 
   // Resolve label and asset list from all target variants
-  const label = target.label || target.folder?.name || target.asset?.title || "";
-  const count = target.assets?.length ?? (target.folder ? (target.folder.count || 0) : 1);
+  const label = existing?.label || target.label || target.folder?.name || target.asset?.title || "";
+  const count = existing?.assetCount ?? target.assets?.length ?? (target.folder ? (target.folder.count || 0) : 1);
+
+  // Hat der Nutzer Einstellungen eines bestehenden Links geändert?
+  const dirty = !!origRef.current && (
+    origRef.current.viewOnly !== viewOnly ||
+    origRef.current.expires !== expires ||
+    origRef.current.recipients !== recipients ||
+    origRef.current.message !== message
+  );
+
+  async function saveChanges() {
+    if (!existing) return;
+    setSaving(true);
+    try {
+      await window.dbUpdateShareLink(slug, { viewOnly, expires, recipients, message });
+      origRef.current = { viewOnly, expires, recipients, message };
+      setDirtyTick(x => x + 1);
+      onShared?.(lang === "de" ? "Änderungen gespeichert" : "Changes saved");
+    } catch (err) {
+      console.error("ShareLink update failed:", err);
+    }
+    setSaving(false);
+  }
 
   // Slim asset snapshot to embed in Firestore (only fields needed for public display)
   function assetSnapshot(a) {
@@ -695,12 +792,14 @@ function ShareDialog({ open, target, onClose, onShared, lang }) {
   return (
     <window.Modal open={open} onClose={onClose} width={520}>
       <div style={{ padding: 24, borderBottom: "1px solid var(--line)" }}>
-        <div className="eyebrow" style={{ marginBottom: 6 }}>{t("share")}</div>
+        <div className="eyebrow" style={{ marginBottom: 6 }}>{existing ? (lang === "de" ? "Geteilten Link bearbeiten" : "Edit shared link") : t("share")}</div>
         <div className="h-2 clamp-1">{label}</div>
         <div style={{ color: "var(--muted)", fontSize: 13, marginTop: 4 }}>
-          {target.folder
+          {existing
             ? t("asset_count_other", { n: count })
-            : target.asset ? `${target.asset.format} · ${target.asset.width}×${target.asset.height}` : ""}
+            : target.folder
+              ? t("asset_count_other", { n: count })
+              : target.asset ? `${target.asset.format} · ${target.asset.width}×${target.asset.height}` : ""}
         </div>
       </div>
 
@@ -749,10 +848,16 @@ function ShareDialog({ open, target, onClose, onShared, lang }) {
       </div>
 
       <div style={{ padding: "12px 24px", borderTop: "1px solid var(--line)", display: "flex", justifyContent: "space-between", gap: 8 }}>
-        <button className="btn ghost" onClick={onClose}>{t("cancel")}</button>
-        <button className="btn primary" onClick={createAndCopy} disabled={saving}>
-          {saving ? "…" : <><window.Icon.copy size={14} /> {t("copy_link")}</>}
-        </button>
+        <button className="btn ghost" onClick={onClose}>{existing ? (lang === "de" ? "Schließen" : "Close") : t("cancel")}</button>
+        {existing ? (
+          <button className="btn primary" onClick={saveChanges} disabled={saving || !dirty}>
+            {saving ? "…" : <><window.Icon.check size={14} /> {dirty ? (lang === "de" ? "Änderungen speichern" : "Save changes") : (lang === "de" ? "Gespeichert" : "Saved")}</>}
+          </button>
+        ) : (
+          <button className="btn primary" onClick={createAndCopy} disabled={saving}>
+            {saving ? "…" : <><window.Icon.copy size={14} /> {t("copy_link")}</>}
+          </button>
+        )}
       </div>
     </window.Modal>
   );

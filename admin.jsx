@@ -95,12 +95,14 @@ function TenantDetail({ tenant, onRefresh }) {
   const [deletingUid,  setDeletingUid]  = useStateAdm(null);
 
   // Edit-State
-  const [editingUid,   setEditingUid]   = useStateAdm(null);
-  const [editEmail,    setEditEmail]    = useStateAdm("");
-  const [editPassword, setEditPassword] = useStateAdm("");
-  const [editShowPw,   setEditShowPw]   = useStateAdm(false);
-  const [editSaving,   setEditSaving]   = useStateAdm(false);
-  const [editMsg,      setEditMsg]      = useStateAdm(null);
+  const [editingUid,    setEditingUid]    = useStateAdm(null);
+  const [editFirstName, setEditFirstName] = useStateAdm("");
+  const [editLastName,  setEditLastName]  = useStateAdm("");
+  const [editEmail,     setEditEmail]     = useStateAdm("");
+  const [editPassword,  setEditPassword]  = useStateAdm("");
+  const [editShowPw,    setEditShowPw]    = useStateAdm(false);
+  const [editSaving,    setEditSaving]    = useStateAdm(false);
+  const [editMsg,       setEditMsg]       = useStateAdm(null);
 
   async function loadUsers() {
     setLoadingUsers(true);
@@ -162,6 +164,8 @@ function TenantDetail({ tenant, onRefresh }) {
 
   function startEdit(u) {
     setEditingUid(u.uid);
+    setEditFirstName(u.firstName || "");
+    setEditLastName(u.lastName   || "");
     setEditEmail(u.email);
     setEditPassword("");
     setEditMsg(null);
@@ -173,19 +177,27 @@ function TenantDetail({ tenant, onRefresh }) {
     const u = users.find(x => x.uid === editingUid);
     if (!u) return;
     setEditSaving(true); setEditMsg(null);
-    const newEmail = editEmail.trim();
+    const newEmail     = editEmail.trim();
+    const newFirstName = editFirstName.trim();
+    const newLastName  = editLastName.trim();
+    const newDisplayName = [newFirstName, newLastName].filter(Boolean).join(" ") || newEmail.split("@")[0];
     const emailChanged = newEmail !== u.email;
+    const nameChanged  = newFirstName !== (u.firstName || "") || newLastName !== (u.lastName || "");
 
     try {
+      // Namen-Änderung direkt in Firestore speichern
+      if (nameChanged) {
+        await window.db.collection("tenants").doc(tenant.id).collection("users").doc(u.uid).update({
+          firstName: newFirstName, lastName: newLastName, displayName: newDisplayName,
+        });
+      }
+
       if (editPassword) {
-        // Passwort direkt via Cloud Function setzen (kein neuer Account nötig)
         const setPassword = window._picpopFunctions.httpsCallable("adminSetPassword");
         await setPassword({ uid: u.uid, newPassword: editPassword });
-        setEditMsg({ ok: true, text: `✓ Passwort für ${u.email} gesetzt.` });
       }
 
       if (emailChanged) {
-        // E-Mail-Änderung: neuen Auth-Account anlegen, Firestore-Einträge tauschen
         if (!editPassword) {
           setEditMsg({ ok: false, text: "Bei E-Mail-Änderung bitte auch neues Passwort eingeben." });
           setEditSaving(false); return;
@@ -193,16 +205,15 @@ function TenantDetail({ tenant, onRefresh }) {
         const { uid: newUid, email: confirmedEmail } = await adminCreateAuthUser(newEmail, editPassword);
         await window.db.collection("tenants").doc(tenant.id).collection("users").doc(newUid).set({
           uid: newUid, email: confirmedEmail, role: u.role || "editor",
+          firstName: newFirstName, lastName: newLastName, displayName: newDisplayName,
           createdAt: firebase.firestore.FieldValue.serverTimestamp(),
         });
         await window.db.collection("userTenants").doc(newUid).set({ tenantId: tenant.id, email: confirmedEmail });
         await window.db.collection("tenants").doc(tenant.id).collection("users").doc(u.uid).delete();
         await window.db.collection("userTenants").doc(u.uid).delete().catch(() => {});
         setEditMsg({ ok: true, text: `✓ E-Mail + Passwort aktualisiert. Neuer Login: ${confirmedEmail}` });
-      }
-
-      if (!editPassword && !emailChanged) {
-        setEditMsg({ ok: true, text: "Keine Änderungen." });
+      } else {
+        setEditMsg({ ok: true, text: "✓ Gespeichert." });
       }
 
       setEditingUid(null);
@@ -373,7 +384,20 @@ function TenantDetail({ tenant, onRefresh }) {
             {editingUid === u.uid && (
               <form onSubmit={handleEditUser} style={{ margin: "0 16px 14px", padding: "14px 16px", background: "var(--hover)", borderRadius: 4, border: "1px solid var(--line-strong)", display: "flex", flexDirection: "column", gap: 10 }}>
                 <div style={{ fontSize: 11, fontFamily: "var(--font-mono)", textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--muted)", marginBottom: 2 }}>
-                  Zugangsdaten bearbeiten
+                  Nutzer bearbeiten
+                </div>
+                {/* Name */}
+                <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                  <div style={{ flex: "1 1 140px" }}>
+                    <div style={{ fontSize: 10, fontFamily: "var(--font-mono)", textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--muted)", marginBottom: 5 }}>Vorname</div>
+                    <input type="text" value={editFirstName} onChange={e => setEditFirstName(e.target.value)}
+                      placeholder="Max" autoComplete="off" style={{ ...inp, width: "100%" }} />
+                  </div>
+                  <div style={{ flex: "1 1 140px" }}>
+                    <div style={{ fontSize: 10, fontFamily: "var(--font-mono)", textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--muted)", marginBottom: 5 }}>Nachname</div>
+                    <input type="text" value={editLastName} onChange={e => setEditLastName(e.target.value)}
+                      placeholder="Mustermann" autoComplete="off" style={{ ...inp, width: "100%" }} />
+                  </div>
                 </div>
                 <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
                   <div style={{ flex: "1 1 200px" }}>

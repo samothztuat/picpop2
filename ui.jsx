@@ -163,6 +163,29 @@ function imgUrl(seed, w = 800, h = 600) {
   return `https://picsum.photos/seed/picpop-${safe}/${Math.round(w)}/${Math.round(h)}`;
 }
 
+// ── Gedrosselte Thumbnail-Selbstheilung ──────────────────────────────────────
+// Bilder OHNE thumbnailUrl laden die Vollauflösung. Sobald so ein Bild im Grid
+// einmal angezeigt wurde, erzeugen wir aus dem bereits geladenen <img> ein
+// 800px-Thumbnail und speichern es — danach lädt das Bild dauerhaft schnell.
+// Max. 2 gleichzeitig, damit der Upload das Browsen nicht ausbremst.
+const _thumbQueue = [];
+let _thumbActive = 0;
+const _thumbDone = new Set();          // verhindert Doppel-Generierung pro Session
+const THUMB_BACKFILL_MAX = 2;
+function _pumpThumbQueue() {
+  while (_thumbActive < THUMB_BACKFILL_MAX && _thumbQueue.length) {
+    const job = _thumbQueue.shift();
+    _thumbActive++;
+    Promise.resolve(job()).catch(() => {}).finally(() => { _thumbActive--; _pumpThumbQueue(); });
+  }
+}
+function enqueueThumbBackfill(asset, imgEl) {
+  if (!asset?.id || asset.thumbnailUrl || _thumbDone.has(asset.id)) return;
+  _thumbDone.add(asset.id);
+  _thumbQueue.push(() => window.backfillThumbnailFromImg?.(asset, imgEl, 800));
+  _pumpThumbQueue();
+}
+
 // Image with hue-tinted placeholder background while loading / on error.
 // Uses thumbnailUrl when available (pre-generated smaller JPEG), falls back to storageUrl.
 // Defers network request via IntersectionObserver until tile is near the viewport.
@@ -172,7 +195,13 @@ function AssetImg({ asset, w = 800, h, style, className = "", alt = "" }) {
   const [visible, setVisible] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [failed, setFailed] = useState(false);
+  // Wenn kein Thumbnail existiert, laden wir das Original crossOrigin, um daraus
+  // ein Thumbnail erzeugen zu können. Schlägt CORS fehl, zeigen wir es ohne
+  // crossOrigin nur an (ohne Selbstheilung).
+  const needsBackfill = !asset.thumbnailUrl && !!asset.storageUrl && asset.kind !== "pdf";
+  const [coFailed, setCoFailed] = useState(false);
   const containerRef = useRef(null);
+  const imgRef = useRef(null);
 
   useEffect(() => {
     const el = containerRef.current;
@@ -180,7 +209,7 @@ function AssetImg({ asset, w = 800, h, style, className = "", alt = "" }) {
     if (!window.IntersectionObserver) { setVisible(true); return; }
     const obs = new IntersectionObserver(
       ([entry]) => { if (entry.isIntersecting) { setVisible(true); obs.disconnect(); } },
-      { rootMargin: "400px" }
+      { rootMargin: "200px" }
     );
     obs.observe(el);
     return () => obs.disconnect();
@@ -190,6 +219,20 @@ function AssetImg({ asset, w = 800, h, style, className = "", alt = "" }) {
   const src = asset.thumbnailUrl
     || asset.storageUrl
     || imgUrl(asset.id + "-" + asset.title, w, height);
+  const useCrossOrigin = needsBackfill && !coFailed;
+
+  function onLoad() {
+    setLoaded(true);
+    // Selbstheilung: aus dem geladenen (CORS-sauberen) Bild ein Thumbnail bauen
+    if (needsBackfill && !coFailed && imgRef.current) {
+      enqueueThumbBackfill(asset, imgRef.current);
+    }
+  }
+  function onError() {
+    // crossOrigin-Ladefehler → erneut ohne crossOrigin versuchen (nur Anzeige)
+    if (useCrossOrigin) { setCoFailed(true); return; }
+    setFailed(true);
+  }
 
   return (
     <div ref={containerRef} className={className} style={{
@@ -200,12 +243,16 @@ function AssetImg({ asset, w = 800, h, style, className = "", alt = "" }) {
     }}>
       {!failed && visible && (
         <img
+          ref={imgRef}
+          key={useCrossOrigin ? "co" : "plain"}
           src={src}
+          {...(useCrossOrigin ? { crossOrigin: "anonymous" } : {})}
           alt={alt || asset.title}
+          loading="lazy"
           decoding="async"
           draggable={false}
-          onLoad={() => setLoaded(true)}
-          onError={() => setFailed(true)}
+          onLoad={onLoad}
+          onError={onError}
           style={{
             width: "100%", height: "100%", objectFit: "cover", display: "block",
             opacity: loaded ? 1 : 0, transition: "opacity .22s ease",

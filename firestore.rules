@@ -1,0 +1,107 @@
+rules_version = '2';
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  picpop — Firestore-Sicherheitsregeln  (Nutzergruppen / Bereiche-Rechtesystem)
+//
+//  DURCHSETZUNG ÜBER AUTH-TOKEN-CLAIMS (von Cloud Functions vorberechnet):
+//    request.auth.token.tenantId   → Mandant des Users
+//    request.auth.token.ppRole     → 'admin' | 'member'
+//    request.auth.token.ppRechte   → { "<bereichId>": "lesen" | "verwalten" }
+//
+//  ⚠️ ROLLOUT-REIHENFOLGE (sonst werden Live-Nutzer ausgesperrt!):
+//    1) Bereiche/Gruppen/Zuordnungen im Admin-Panel setzen
+//    2) "Claims neu berechnen" ausführen (refreshTenantClaims) — jeder User
+//       bekommt tenantId + ppRole + ppRechte ins Token
+//    3) Nutzer neu anmelden / Token erneuern lassen (Claims greifen erst dann)
+//    4) ERST DANN diese Regeln deployen: firebase deploy --only firestore:rules
+//
+//  Diese Fassung setzt SCHREIBrechte je Bereich durch (Schutz vor unbefugter
+//  Änderung). LESEN bleibt für Mandanten-Mitglieder offen, weil das aktuelle
+//  Client-Abfragemodell die gesamte assets-Collection lädt (per-Dokument-
+//  Lesesperren würden List-Queries komplett ablehnen). Vollständige Lese-
+//  Segregierung nach Bereich erfordert zusätzlich, die Client-Abfragen auf die
+//  erlaubten Bereiche einzuschränken (where('bereichEff','in', …)).
+// ══════════════════════════════════════════════════════════════════════════════
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn()      { return request.auth != null; }
+    function email()         { return signedIn() ? request.auth.token.email : ''; }
+    function isSuperadmin()  { return email() == 'tomtautz@gmail.com'; }
+    function claimTenant()   { return signedIn() ? request.auth.token.tenantId : null; }
+    function isMember(tid)   { return signedIn() && (claimTenant() == tid); }
+    function isAdmin(tid)    { return isMember(tid) && (request.auth.token.ppRole == 'admin'); }
+    function verwalter(tid)  { return isSuperadmin() || isAdmin(tid); }
+
+    function rechte()        { return signedIn() ? request.auth.token.ppRechte : null; }
+    // Leerer/kein Bereich → als 'verwalten' behandelt (bereichsfreie Inhalte offen,
+    // bis ein Bereich gesetzt wird) → kein Lockout bestehender Inhalte.
+    function stufe(bereich) {
+      return (bereich == null || bereich == '')
+        ? 'verwalten'
+        : (rechte() != null && (bereich in rechte()) ? rechte()[bereich] : 'kein');
+    }
+    function darfSchreiben(tid, bereich) {
+      return verwalter(tid) || (isMember(tid) && stufe(bereich) == 'verwalten');
+    }
+
+    // ── Öffentliche Freigaben: einzelnes Dokument ohne Login lesbar ───────────
+    match /shareLinks/{slug} {
+      allow get:   if true;            // externer Empfänger ruft per Slug ab
+      allow list:  if false;
+      allow write: if signedIn();      // Anlegen/Ändern durch angemeldete Nutzer
+    }
+
+    // ── Root: Nutzer↔Mandant-Zuordnung ───────────────────────────────────────
+    match /userTenants/{uid} {
+      allow read:  if isSuperadmin() || (signedIn() && request.auth.uid == uid);
+      allow write: if isSuperadmin();
+    }
+
+    // ── Mandanten-Stammdaten ─────────────────────────────────────────────────
+    match /tenants/{tid} {
+      allow get:   if isMember(tid) || isSuperadmin();
+      allow list:  if isSuperadmin();
+
+      // Konten: nur über Cloud Functions schreibbar
+      match /users/{uid} {
+        allow read:  if isSuperadmin() || isAdmin(tid) || (isMember(tid) && request.auth.uid == uid);
+        allow write: if false;
+      }
+      // Gruppen & Bereiche/Einstellungen: Admin verwaltet, Mitglied liest
+      match /groups/{gid} {
+        allow read:  if isMember(tid) || isSuperadmin();
+        allow write: if verwalter(tid);
+      }
+      match /settings/{doc} {
+        allow read:  if isMember(tid) || isSuperadmin();
+        allow write: if verwalter(tid);
+      }
+
+      // Inhalte mit Bereichsbindung — Schreibrechte je Bereich durchgesetzt
+      match /folders/{fid} {
+        allow read:  if isMember(tid) || isSuperadmin();
+        allow create: if darfSchreiben(tid, request.resource.data.bereichId);
+        allow update, delete: if darfSchreiben(tid, resource.data.bereichId);
+      }
+      match /pdfFolders/{fid} {
+        allow read:  if isMember(tid) || isSuperadmin();
+        allow create: if darfSchreiben(tid, request.resource.data.bereichId);
+        allow update, delete: if darfSchreiben(tid, resource.data.bereichId);
+      }
+      match /assets/{aid} {
+        allow read:  if isMember(tid) || isSuperadmin();
+        allow create: if darfSchreiben(tid, request.resource.data.bereichEff);
+        allow update, delete: if darfSchreiben(tid, resource.data.bereichEff);
+      }
+
+      // Übrige Mandanten-Collections: Mitglied liest & schreibt
+      match /tags/{id}            { allow read, write: if isMember(tid) || isSuperadmin(); }
+      match /tagCollections/{id}  { allow read, write: if isMember(tid) || isSuperadmin(); }
+      match /team/{id}            { allow read, write: if isMember(tid) || isSuperadmin(); }
+      match /activity/{id}        { allow read, write: if isMember(tid) || isSuperadmin(); }
+      match /sharedLinks/{id}     { allow read, write: if isMember(tid) || isSuperadmin(); }
+    }
+  }
+}
