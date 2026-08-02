@@ -704,7 +704,7 @@ function Sidebar({ area, setArea, folders, route, setRoute, lang, onUpload, onCr
           <window.Icon.settings size={13} />
           {!col && <span>{t("nav_team")}</span>}
         </div>
-        {currentUser?.email === window.SUPERADMIN_EMAIL && (
+        {currentUser?.email === window.SUPERADMIN_EMAIL && !window.ppViewAs?.() && (
           <div className={"nav-item" + (baseRoute === "admin" ? " active" : "")} onClick={() => setRoute("admin")} style={col ? { justifyContent: "center", padding: "7px 0" } : undefined} title={col ? "Admin" : undefined}>
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
               <path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/>
@@ -1285,6 +1285,7 @@ function App() {
   const [tagCollections, setTagCollections] = useStateA([]);
   const [activeTagColId, setActiveTagColId] = useStateA(null);
   const [dbReady, setDbReady] = useStateA(false);
+  const [storageBackends, setStorageBackends] = useStateA([]); // Bildspeicher-Backends (Filter)
   // „Als User anzeigen"-Simulation (Rechte-Test) — triggert Re-Render bei Wechsel
   const ppViewAsState = window.usePpViewAs ? window.usePpViewAs() : null;
 
@@ -1313,7 +1314,7 @@ function App() {
       .then(snap => { if (snap.exists) setCompanyName(snap.data().companyName || ""); })
       .catch(() => {});
 
-    let unsubFolders, unsubPdfs, unsubAssets, unsubTags, unsubTeam, unsubTagCols;
+    let unsubFolders, unsubPdfs, unsubAssets, unsubTags, unsubTeam, unsubTagCols, unsubBackends;
     window.seedIfEmpty()
       .then(() => {
         unsubFolders = window.subscribeToFolders(data => setImageFolders(data));
@@ -1336,12 +1337,14 @@ function App() {
           window.SHARED_LINKS = data; setSharedLinks(data);
         });
         unsubTagCols = window.subscribeToTagCollections?.(data => setTagCollections(data));
+        window.ensureDefaultBackend?.().catch(() => {});
+        unsubBackends = window.subscribeToStorageBackends?.(data => setStorageBackends(data));
       })
       .catch(err => {
         console.error("Firestore init error:", err);
         setDbReady(true);
       });
-    return () => { unsubFolders?.(); unsubPdfs?.(); unsubAssets?.(); unsubTags?.(); unsubTeam?.(); unsubTagCols?.(); };
+    return () => { unsubFolders?.(); unsubPdfs?.(); unsubAssets?.(); unsubTags?.(); unsubTeam?.(); unsubTagCols?.(); unsubBackends?.(); };
   }, [user]);
 
   const folders = area === "images" ? imageFolders : pdfFolders;
@@ -1649,7 +1652,9 @@ function App() {
   }
 
   // Rechte-Simulation: im „Als User anzeigen"-Modus nur sichtbare Inhalte durchreichen.
-  const visibleAssets       = window.ppFilterAssets  ? window.ppFilterAssets(assets)        : assets;
+  // Erst nach aktivem Bildspeicher-Backend filtern, dann nach Rechten (Simulation)
+  const backendAssets       = window.filterByBackend ? window.filterByBackend(assets)        : assets;
+  const visibleAssets       = window.ppFilterAssets  ? window.ppFilterAssets(backendAssets)  : backendAssets;
   const visibleImageFolders = window.ppFilterFolders ? window.ppFilterFolders(imageFolders) : imageFolders;
   const visiblePdfFolders   = window.ppFilterFolders ? window.ppFilterFolders(pdfFolders)   : pdfFolders;
 

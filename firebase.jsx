@@ -475,6 +475,74 @@ async function dbSaveBereiche(liste) {
   await tenantDoc("settings", "bereiche").set({ liste }, { merge: true });
 }
 
+// ══════════════════════════════════════════════════════════════════════════════
+//  BILDSPEICHER-BACKENDS (austauschbare Ablage der Original-Dateien pro Mandant)
+//  Metadaten + Thumbnails bleiben IMMER auf Firebase. Nur das Original wandert
+//  je nach aktivem Backend (firebase | onedrive).
+//  tenants/{tid}/storageBackends/{id}: { id, name, type, active, isDefault, config }
+// ══════════════════════════════════════════════════════════════════════════════
+const DEFAULT_BACKEND_ID = "firebase";
+
+function subscribeToStorageBackends(cb) {
+  return tenantCol("storageBackends").onSnapshot(snap => {
+    const docs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    docs.sort((a, b) => (a.createdAt < b.createdAt ? -1 : 1));
+    window.STORAGE_BACKENDS = docs;
+    cb(docs);
+  });
+}
+// Legt beim ersten Aufruf ein Standard-Firebase-Backend an (idempotent).
+async function ensureDefaultBackend() {
+  const ref = tenantCol("storageBackends").doc(DEFAULT_BACKEND_ID);
+  const snap = await ref.get();
+  if (!snap.exists) {
+    await ref.set({
+      id: DEFAULT_BACKEND_ID, name: "Firebase (Standard)", type: "firebase",
+      active: true, isDefault: true, config: {},
+      createdAt: new Date().toISOString(),
+    });
+  }
+}
+async function dbSaveStorageBackend(b) {
+  const id = b.id || ("sb-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5));
+  await tenantCol("storageBackends").doc(id).set({ ...b, id }, { merge: true });
+  return id;
+}
+async function dbDeleteStorageBackend(id) {
+  if (id === DEFAULT_BACKEND_ID) throw new Error("Standard-Backend kann nicht gelöscht werden.");
+  await tenantCol("storageBackends").doc(id).delete();
+}
+async function dbSetStorageBackendActive(id, active) {
+  await tenantCol("storageBackends").doc(id).set({ active: !!active }, { merge: true });
+}
+// Genau ein Standard-Ziel für neue Uploads: setzt isDefault exklusiv.
+async function dbSetDefaultStorageBackend(id, allBackends) {
+  const batch = db.batch();
+  (allBackends || window.STORAGE_BACKENDS || []).forEach(b => {
+    batch.set(tenantCol("storageBackends").doc(b.id), { isDefault: b.id === id }, { merge: true });
+  });
+  await batch.commit();
+}
+// Aktive Backend-IDs als Set (für Client-Filterung). Fehlt storageBackend am Asset,
+// gilt es als Standard-Backend.
+function activeBackendIds() {
+  const list = window.STORAGE_BACKENDS || [];
+  if (list.length === 0) return null; // noch nicht konfiguriert → kein Filter
+  return new Set(list.filter(b => b.active).map(b => b.id));
+}
+// Filtert Assets auf die aktiven Backends. Null-Set (unkonfiguriert) → alles sichtbar.
+function filterByBackend(assets) {
+  const active = activeBackendIds();
+  if (!active) return assets || [];
+  return (assets || []).filter(a => active.has(a.storageBackend || DEFAULT_BACKEND_ID));
+}
+// Standard-Ziel für neue Uploads.
+function defaultBackendId() {
+  const list = window.STORAGE_BACKENDS || [];
+  const def = list.find(b => b.isDefault && b.active) || list.find(b => b.active);
+  return def ? def.id : DEFAULT_BACKEND_ID;
+}
+
 // ── Gruppen ──────────────────────────────────────────────────────────────────
 function subscribeToGroups(cb) {
   return tenantCol("groups").onSnapshot(snap => {
@@ -875,6 +943,7 @@ async function uploadAsset(file, folderId, tags = [], onProgress = null, author 
     storageUrl,
     storagePath,
     thumbnailUrl,
+    storageBackend: defaultBackendId(), // in welchem Backend liegt das Original
     size: parseFloat((file.size / 1024 / 1024).toFixed(1)),
     date: new Date().toISOString(),
     takenAt,
@@ -944,6 +1013,9 @@ async function backfillThumbnailFromImg(asset, imgEl, longPx = 800) {
 Object.assign(window, {
   // Nutzergruppen & Rechte
   subscribeToBereiche, dbSaveBereiche,
+  subscribeToStorageBackends, ensureDefaultBackend, dbSaveStorageBackend, dbDeleteStorageBackend,
+  dbSetStorageBackendActive, dbSetDefaultStorageBackend, filterByBackend, activeBackendIds, defaultBackendId,
+  DEFAULT_BACKEND_ID,
   subscribeToGroups, dbSaveGroup, dbDeleteGroup, parseGroupsCsv,
   fnListTenantUsers, fnSetUserGroups, fnSetUserRole, fnRefreshTenantClaims, fnPurgeTenantUsers,
   regenerateThumbnail,

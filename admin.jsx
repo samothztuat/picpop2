@@ -626,6 +626,9 @@ function AdminView({ lang }) {
 // ── ImpersonationBanner ───────────────────────────────────────────────────────
 function ImpersonationBanner({ tenantId }) {
   const [tenants, setTenants] = useStateAdm([]);
+  const [tUsers, setTUsers] = useStateAdm([]);   // Konten des Mandanten (für „Als User")
+  const [tGroups, setTGroups] = useStateAdm([]);  // Gruppen (für Rechte-Berechnung)
+  const ppView = window.usePpViewAs ? window.usePpViewAs() : null; // aktive User-Ansicht
 
   useEffectAdm(() => {
     if (!window.db) return;
@@ -638,6 +641,20 @@ function ImpersonationBanner({ tenantId }) {
       })
       .catch(() => {});
   }, []);
+
+  // Konten + Gruppen des aktuellen Mandanten laden (für die User-Ansicht)
+  useEffectAdm(() => {
+    let unsub;
+    window.fnListTenantUsers?.().then(us => setTUsers(us || [])).catch(() => {});
+    unsub = window.subscribeToGroups?.(setTGroups);
+    return () => unsub && unsub();
+  }, [tenantId]);
+
+  function pickUser(uid) {
+    if (!uid) { window.ppClearViewAs?.(); return; }
+    const u = tUsers.find(x => x.uid === uid);
+    if (u) window.ppSetViewAs?.(window.ppComputeIdentity(u, tGroups));
+  }
 
   function stop() {
     sessionStorage.removeItem("picpop_admin_impersonate");
@@ -682,7 +699,26 @@ function ImpersonationBanner({ tenantId }) {
         <span style={{ fontWeight: 700 }}>{tenantId}</span>
       )}
 
+      {/* User-Ansicht: als konkreter Nutzer sehen, was er sieht */}
+      <span style={{ opacity: 0.4 }}>·</span>
+      <span style={{ opacity: 0.85 }}>Als User:</span>
+      <select value={ppView?.uid || ""} onChange={e => pickUser(e.target.value)} style={{ ...selectStyle, maxWidth: 220 }}
+        title="Die App aus Sicht dieses Users anzeigen">
+        <option value="">— aus —</option>
+        {tUsers.map(u => (
+          <option key={u.uid} value={u.uid}>{(u.displayName || u.email) + (u.role === "admin" ? " (Admin)" : "")}</option>
+        ))}
+      </select>
+      {ppView && (
+        <button onClick={() => pickUser("")}
+          style={{ height: 22, padding: "0 8px", background: "rgba(255,255,255,0.28)", border: "1px solid rgba(255,255,255,0.4)", borderRadius: 3, color: "#fff", cursor: "pointer", fontSize: 11, fontWeight: 600 }}
+          title="User-Ansicht beenden">User-Ansicht aus</button>
+      )}
+
       <div style={{ flex: 1 }} />
+      {/* Code-Sicherung (Commit/Push) — ContextR-Mechanik über Firestore-Briefkasten */}
+      {window.GitStatusBadge && <window.GitStatusBadge />}
+      <div style={{ width: 1, height: 18, background: "rgba(255,255,255,0.3)" }} />
       <button onClick={stop}
         style={{ height: 26, padding: "0 14px", background: "rgba(255,255,255,0.2)", border: "1px solid rgba(255,255,255,0.35)", borderRadius: 3, color: "#fff", cursor: "pointer", fontSize: 12, fontWeight: 600 }}
         onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.3)"}

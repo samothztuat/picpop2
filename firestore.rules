@@ -59,6 +59,11 @@ service cloud.firestore {
       allow write: if isSuperadmin();
     }
 
+    // ── Code-Sicherung: Git-Briefkasten (nur Superadmin) ─────────────────────
+    match /system/{doc} {
+      allow read, write: if isSuperadmin();
+    }
+
     // ── Mandanten-Stammdaten ─────────────────────────────────────────────────
     match /tenants/{tid} {
       allow get:   if isMember(tid) || isSuperadmin();

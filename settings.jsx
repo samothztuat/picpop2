@@ -61,6 +61,33 @@ function SectionLabel({ children }) {
     }}>{children}</div>
   );
 }
+// Einklappbarer Einstellungs-Bereich (Akkordeon). Große, klickbare Überschrift;
+// Inhalt nur sichtbar, wenn geöffnet.
+function AccordionSection({ id, title, open, onToggle, children }) {
+  return (
+    <section style={{ border: "1px solid var(--line)", borderRadius: 8, overflow: "hidden", background: "var(--panel)" }}>
+      <button
+        onClick={() => onToggle(id)}
+        aria-expanded={open}
+        style={{
+          width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between",
+          gap: 12, padding: "18px 22px", background: "none", border: "none", cursor: "pointer",
+          textAlign: "left", color: "var(--fg)",
+        }}
+      >
+        <span style={{ fontSize: 20, fontWeight: 600, letterSpacing: "-0.015em" }}>{title}</span>
+        <span style={{ display: "inline-flex", color: "var(--muted)", transition: "transform .2s var(--ease-out)", transform: open ? "rotate(90deg)" : "none" }}>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6" /></svg>
+        </span>
+      </button>
+      {open && (
+        <div style={{ padding: "6px 22px 26px", borderTop: "1px solid var(--line)" }}>
+          {children}
+        </div>
+      )}
+    </section>
+  );
+}
 function FieldLabel({ children }) {
   return (
     <div style={{
@@ -540,12 +567,14 @@ function SettingsView({ lang, setLang, theme, setTheme, density, setDensity, tea
   /* ── Render ── */
   // Technische/Admin-Bereiche nur für Superadmin (und nicht im „Als User anzeigen"-Modus)
   const seesTechnik = window.CURRENT_USER?.email === window.SUPERADMIN_EMAIL && !window.ppViewAs?.();
+  // Akkordeon: standardmäßig alle Bereiche eingeklappt; nur einer gleichzeitig offen
+  const [openSec, setOpenSec] = useStateS(null);
+  const toggleSec = (id) => setOpenSec(s => (s === id ? null : id));
   return (
-    <div style={{ padding: "32px 40px 80px", overflow: "auto", flex: 1, display: "flex", flexDirection: "column", gap: 48, maxWidth: 900 }}>
+    <div style={{ padding: "32px 40px 80px", overflow: "auto", flex: 1, display: "flex", flexDirection: "column", gap: 12, maxWidth: 900 }}>
 
       {/* ══ 1 · Sprache & Darstellung ══════════════════════════════════════ */}
-      <section>
-        <SectionLabel>{lang === "de" ? "Sprache & Darstellung" : "Language & Appearance"}</SectionLabel>
+      <AccordionSection id="sprache" title={lang === "de" ? "Sprache & Darstellung" : "Language & Appearance"} open={openSec === "sprache"} onToggle={toggleSec}>
         <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
 
           {/* Language */}
@@ -628,12 +657,11 @@ function SettingsView({ lang, setLang, theme, setTheme, density, setDensity, tea
           </div>
 
         </div>
-      </section>
+      </AccordionSection>
 
       {/* ══ 2 · Datenbankverbindung ═════════════════════════════════════════ */}
       {seesTechnik && (
-      <section>
-        <SectionLabel>{lang === "de" ? "Datenbankverbindung" : "Database connection"}</SectionLabel>
+      <AccordionSection id="db" title={lang === "de" ? "Datenbankverbindung" : "Database connection"} open={openSec === "db"} onToggle={toggleSec}>
         <div style={{ ...card }}>
 
           {/* Header row */}
@@ -706,13 +734,12 @@ function SettingsView({ lang, setLang, theme, setTheme, density, setDensity, tea
               : "Configuration is read directly from the bundle. Edit firebase.jsx to change."}
           </div>
         </div>
-      </section>
+      </AccordionSection>
       )}
 
       {/* ══ 3 · GitHub · Versionskontrolle ══════════════════════════════════ */}
       {seesTechnik && (
-      <section>
-        <SectionLabel>GitHub · {lang === "de" ? "Versionskontrolle" : "Version control"}</SectionLabel>
+      <AccordionSection id="github" title={<>GitHub · {lang === "de" ? "Versionskontrolle" : "Version control"}</>} open={openSec === "github"} onToggle={toggleSec}>
 
         {/* ── Verbindungskarte ── */}
         <div style={{ ...card, marginBottom: 2 }}>
@@ -945,13 +972,12 @@ function SettingsView({ lang, setLang, theme, setTheme, density, setDensity, tea
             ? "Das PAT benötigt die Berechtigungen repo (Lesen/Schreiben). Bilder in Firebase Storage werden nicht migriert, nur die Metadaten."
             : "The PAT requires repo (read/write) permissions. Images in Firebase Storage are not migrated, only metadata."}
         </div>
-      </section>
+      </AccordionSection>
       )}
 
       {/* ══ 3b · Deployment & Infrastruktur ════════════════════════════════ */}
       {seesTechnik && (
-      <section>
-        <SectionLabel>{lang === "de" ? "Deployment & Infrastruktur" : "Deployment & Infrastructure"}</SectionLabel>
+      <AccordionSection id="deploy" title={lang === "de" ? "Deployment & Infrastruktur" : "Deployment & Infrastructure"} open={openSec === "deploy"} onToggle={toggleSec}>
 
         {/* Firebase Hosting */}
         <div style={{ ...card, marginBottom: 2 }}>
@@ -1108,13 +1134,12 @@ jobs:
             ? "picpop verwendet zwei unabhängige Versionierungsebenen: (1) Quellcode via Git/GitHub — Commits der JSX/HTML-Dateien, wiederherstellbar per Dev-Panel. (2) Firestore-Daten via GitHub-API — JSON-Snapshots aller Assets, Tags und Ordner, wiederherstellbar per Pull oben."
             : "picpop uses two independent versioning layers: (1) Source code via Git/GitHub — commits of JSX/HTML files, restorable via Dev Panel. (2) Firestore data via GitHub API — JSON snapshots of all assets, tags and folders, restorable via Pull above."}
         </div>
-      </section>
+      </AccordionSection>
       )}
 
       {/* ══ 4 · KI-Konfiguration (API-Schlüssel — nur Superadmin) ═══════════ */}
       {seesTechnik && (
-      <section>
-        <SectionLabel>{lang === "de" ? "KI-Konfiguration" : "AI configuration"}</SectionLabel>
+      <AccordionSection id="ki" title={lang === "de" ? "KI-Konfiguration" : "AI configuration"} open={openSec === "ki"} onToggle={toggleSec}>
         <div style={{ marginBottom: 12, fontSize: 12, color: "var(--muted)", lineHeight: 1.6 }}>
           {lang === "de"
             ? "API-Schlüssel für KI-gestützte Funktionen: automatisches Tagging, Bildbeschreibungen, Alt-Texte und Metadaten-Anreicherung."
@@ -1258,25 +1283,30 @@ jobs:
             </button>
           </div>
         </div>
-      </section>
+      </AccordionSection>
       )}
 
       {/* ══ Benutzer & Gruppen (nur Superadmin / Mandanten-Admin) ═════════════ */}
       {(window.CURRENT_USER?.email === window.SUPERADMIN_EMAIL || window.PP_IS_ADMIN) && window.UserGroupsPanel && (
-        <section>
-          <SectionLabel>{lang === "de" ? "Benutzer & Gruppen" : "Users & groups"}</SectionLabel>
+        <AccordionSection id="benutzer" title={lang === "de" ? "Benutzer & Gruppen" : "Users & groups"} open={openSec === "benutzer"} onToggle={toggleSec}>
           <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 16, lineHeight: 1.6 }}>
             {lang === "de"
               ? "Bereiche gliedern die Inhalte, Gruppen vergeben je Bereich Rechte, Konten werden Gruppen zugeordnet. Zugriffsregeln werden serverseitig durchgesetzt."
               : "Areas partition content, groups grant per-area rights, accounts are assigned to groups. Access is enforced server-side."}
           </div>
           <window.UserGroupsPanel lang={lang} />
-        </section>
+        </AccordionSection>
+      )}
+
+      {/* ══ Bildspeicher / Datenbanken (nur Superadmin) ═════════════════════ */}
+      {seesTechnik && window.StorageBackendsPanel && (
+        <AccordionSection id="speicher" title={lang === "de" ? "Bildspeicher" : "Image storage"} open={openSec === "speicher"} onToggle={toggleSec}>
+          <window.StorageBackendsPanel lang={lang} />
+        </AccordionSection>
       )}
 
       {/* ══ 4 · Urheber ══════════════════════════════════════════════════════ */}
-      <section>
-        <SectionLabel>{lang === "de" ? "Urheber" : "Authors"}</SectionLabel>
+      <AccordionSection id="urheber" title={lang === "de" ? "Urheber" : "Authors"} open={openSec === "urheber"} onToggle={toggleSec}>
 
         <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 16, lineHeight: 1.6 }}>
           {lang === "de"
@@ -1458,11 +1488,10 @@ jobs:
             );
           })}
         </div>
-      </section>
+      </AccordionSection>
 
       {/* ══ 5 · Tags ═══════════════════════════════════════════════════════ */}
-      <section>
-        <SectionLabel>{lang === "de" ? "Tags verwalten" : "Manage tags"}</SectionLabel>
+      <AccordionSection id="tags" title={lang === "de" ? "Tags verwalten" : "Manage tags"} open={openSec === "tags"} onToggle={toggleSec}>
 
         {/* Render one group: sub-header + optional create form + table of rows */}
         {(() => {
@@ -1605,11 +1634,11 @@ jobs:
           );
         });
         })()}
-      </section>
+      </AccordionSection>
 
       {/* ══ 6 · App-Info · Workspace (nur Superadmin) ═══════════════════════ */}
       {seesTechnik && (
-      <section>
+      <AccordionSection id="system" title={lang === "de" ? "Workspace & App-Info" : "Workspace & App info"} open={openSec === "system"} onToggle={toggleSec}>
         {/* ── Workspace / Tenant ───────────────────────────────────────────── */}
         <section style={{ marginBottom: 56 }}>
         <SectionLabel>{lang === "de" ? "Workspace" : "Workspace"}</SectionLabel>
@@ -1675,7 +1704,7 @@ jobs:
             ))}
           </div>
         </div>
-      </section>
+      </AccordionSection>
       )}
 
     </div>
