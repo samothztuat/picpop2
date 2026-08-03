@@ -1,5 +1,6 @@
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { onDocumentWritten } = require("firebase-functions/v2/firestore");
+const { defineSecret } = require("firebase-functions/params");
 const functionsV1 = require("firebase-functions/v1");
 const { initializeApp } = require("firebase-admin/app");
 const { getAuth } = require("firebase-admin/auth");
@@ -9,6 +10,82 @@ initializeApp();
 
 const REGION = "europe-west1";
 const SUPERADMIN_EMAIL = "tomtautz@gmail.com";
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  ONEDRIVE (Microsoft Graph, app-only) — Bildspeicher-Backend für Mandant phaeno
+//  DATENSCHUTZ-GARANTIE: Alle Zugriffe sind HART auf genau EIN OneDrive verdrahtet
+//  (picpop-test@phaeno.de / Ordner „Media"). Kein User-Parameter, kein Zugriff auf
+//  andere Drives im Tenant — auch nicht mit der breiten Files.ReadWrite.All-Rolle.
+// ══════════════════════════════════════════════════════════════════════════════
+const MS_CLIENT_SECRET = defineSecret("MS_CLIENT_SECRET");
+const MS_TENANT   = "c20f8d61-587a-4dba-9fcd-ffa942e9ac59";
+const MS_CLIENT   = "ce3b8711-6d4f-4b52-a296-779385717b18";
+const OD_USER     = "picpop-test@phaeno.de";  // ← einziger erlaubter Drive
+const OD_FOLDER   = "Media";
+const GRAPH       = "https://graph.microsoft.com/v1.0";
+
+let _msTok = { value: null, exp: 0 };
+async function graphToken() {
+  if (_msTok.value && Date.now() < _msTok.exp - 60000) return _msTok.value;
+  const res = await fetch(`https://login.microsoftonline.com/${MS_TENANT}/oauth2/v2.0/token`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      client_id: MS_CLIENT, client_secret: MS_CLIENT_SECRET.value(),
+      scope: "https://graph.microsoft.com/.default", grant_type: "client_credentials",
+    }),
+  });
+  const d = await res.json();
+  if (!d.access_token) throw new HttpsError("internal", "Graph-Token: " + JSON.stringify(d).slice(0, 180));
+  _msTok = { value: d.access_token, exp: Date.now() + (d.expires_in || 3600) * 1000 };
+  return _msTok.value;
+}
+// Basis-URL des EINEN erlaubten Drives — hart verdrahtet.
+function odBase() { return `${GRAPH}/users/${encodeURIComponent(OD_USER)}/drive`; }
+
+// Verbindungstest + Media-Ordner-Info (nur Superadmin).
+exports.msTestConnection = onCall({ region: REGION, secrets: [MS_CLIENT_SECRET] }, async (req) => {
+  if (req.auth?.token?.email !== SUPERADMIN_EMAIL) throw new HttpsError("permission-denied", "Nur Superadmin.");
+  const tok = await graphToken();
+  const r = await fetch(`${odBase()}?$select=id,driveType,quota`, { headers: { Authorization: `Bearer ${tok}` } });
+  const d = await r.json();
+  if (d.error) throw new HttpsError("internal", d.error.message);
+  const fr = await fetch(`${odBase()}/root:/${OD_FOLDER}`, { headers: { Authorization: `Bearer ${tok}` } });
+  const fd = await fr.json();
+  return { driveId: d.id, driveType: d.driveType, quota: d.quota || null, user: OD_USER, folder: OD_FOLDER, folderId: fd.id || null };
+});
+
+// Upload-Session anlegen → der Browser lädt die Datei direkt zur zurückgegebenen
+// (vorautorisierten) uploadUrl hoch. Ziel ist IMMER der Media-Ordner.
+exports.msCreateUploadSession = onCall({ region: REGION, secrets: [MS_CLIENT_SECRET] }, async (req) => {
+  if (!req.auth) throw new HttpsError("unauthenticated", "Nicht angemeldet.");
+  const { filename, assetId } = req.data || {};
+  if (!filename) throw new HttpsError("invalid-argument", "filename fehlt.");
+  const safe = String(filename).replace(/[\\/:*?"<>|]/g, "_");
+  const path = `${OD_FOLDER}/${assetId ? assetId + "-" : ""}${safe}`;
+  const tok = await graphToken();
+  const r = await fetch(`${odBase()}/root:/${encodeURI(path)}:/createUploadSession`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${tok}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ item: { "@microsoft.graph.conflictBehavior": "rename" } }),
+  });
+  const d = await r.json();
+  if (!d.uploadUrl) throw new HttpsError("internal", "Upload-Session: " + JSON.stringify(d).slice(0, 180));
+  return { uploadUrl: d.uploadUrl, path };
+});
+
+// Kurzlebige Download-URL für ein Original aus dem Media-Ordner.
+exports.msGetDownloadUrl = onCall({ region: REGION, secrets: [MS_CLIENT_SECRET] }, async (req) => {
+  if (!req.auth) throw new HttpsError("unauthenticated", "Nicht angemeldet.");
+  const { itemId } = req.data || {};
+  if (!itemId) throw new HttpsError("invalid-argument", "itemId fehlt.");
+  const tok = await graphToken();
+  const r = await fetch(`${odBase()}/items/${encodeURIComponent(itemId)}?$select=id,name,size,@microsoft.graph.downloadUrl`, { headers: { Authorization: `Bearer ${tok}` } });
+  const d = await r.json();
+  const url = d["@microsoft.graph.downloadUrl"];
+  if (!url) throw new HttpsError("internal", "Download-URL: " + (d.error?.message || "nicht gefunden"));
+  return { downloadUrl: url, name: d.name, size: d.size };
+});
 
 // E-Mail-Domain → picpop-Mandant. Steuert das Auto-Provisioning beim Erstlogin.
 // Bei Bedarf weitere Domains/Mandanten ergänzen.
