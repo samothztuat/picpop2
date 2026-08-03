@@ -230,9 +230,9 @@ function AssetDetailModal({ open, asset: assetProp, peerAssets, onNavigate, onCl
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
             </button>
           )}
-          {/* Image */}
+          {/* Image — OneDrive-Originale liegen nicht als direkte URL vor → Thumbnail zeigen */}
           <img
-            src={asset.storageUrl || window.imgUrl(asset.id + "-" + asset.title, 3200, Math.round(3200 / (asset.ratio || 1)))}
+            src={asset.storageUrl || asset.thumbnailUrl || window.imgUrl(asset.id + "-" + asset.title, 3200, Math.round(3200 / (asset.ratio || 1)))}
             alt={asset.title}
             draggable={false}
             onClick={e => e.stopPropagation()}
@@ -633,14 +633,15 @@ function AssetDetailModal({ open, asset: assetProp, peerAssets, onNavigate, onCl
               </button>
             )}
 
-            {/* Download — original file */}
-            {asset.storageUrl && (
+            {/* Download — original file (Firebase direkt · OneDrive über Graph) */}
+            {(asset.storageUrl || asset.storageRef?.itemId) && (
               <button
                 className="btn"
-                onClick={() => {
+                onClick={async () => {
                   const ext = (asset.format || (asset.kind === "pdf" ? "pdf" : "jpg")).toLowerCase().replace("jpeg", "jpg");
                   const fname = (asset.title || "download").replace(/[^\w\-]/g, "_") + "." + ext;
-                  nativeDownload(asset.storageUrl, fname);
+                  const url = window.resolveOriginalUrl ? await window.resolveOriginalUrl(asset) : asset.storageUrl;
+                  if (url) nativeDownload(url, fname);
                 }}
               >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>

@@ -14,6 +14,7 @@
     const [nDrive, setNDrive] = useState("");
     const [nFolder, setNFolder] = useState("");
     const [toast, setToast] = useState("");
+    const [busy, setBusy] = useState("");
 
     useEffect(() => {
       window.ensureDefaultBackend?.().catch(() => {});
@@ -21,7 +22,17 @@
       return () => unsub && unsub();
     }, []);
 
-    function flash(m) { setToast(m); setTimeout(() => setToast(""), 3000); }
+    function flash(m) { setToast(m); setTimeout(() => setToast(""), 5000); }
+
+    async function testConnection() {
+      setBusy("test");
+      try {
+        const r = await window.fnMsTestConnection();
+        const freeGB = r.quota ? Math.round((r.quota.total - r.quota.used) / 1e9) : "?";
+        flash(`✓ Verbunden mit ${r.user} · Ordner „${r.folder}" ${r.folderId ? "vorhanden" : "FEHLT"} · ${freeGB} GB frei`);
+      } catch (e) { flash("✗ Verbindung fehlgeschlagen: " + (e.message || e)); }
+      setBusy("");
+    }
 
     async function toggleActive(b) {
       try { await window.dbSetStorageBackendActive(b.id, !b.active); }
@@ -78,7 +89,9 @@
             typePill(b.type),
             b.isDefault && h("span", { style: { fontSize: 10, fontFamily: "var(--font-mono)", color: "var(--accent)", border: "1px solid var(--accent)", borderRadius: 999, padding: "1px 6px" } }, "STANDARD")),
           b.type === "onedrive" && h("div", { style: { fontSize: 11, color: "var(--faint)", fontFamily: "var(--font-mono)", marginTop: 3 } },
-            (b.config?.folderPath || "kein Ordner") + (b.config?.driveId ? " · drive " + b.config.driveId.slice(0, 10) + "…" : "") + " · ⚠ Anbindung folgt (Phase 2)")),
+            (b.config?.folderPath || "OneDrive · Media") + (b.config?.driveId ? " · drive " + b.config.driveId.slice(0, 10) + "…" : ""))),
+        // Verbindung testen (nur OneDrive)
+        b.type === "onedrive" && h("button", { className: "btn sm", disabled: busy === "test", onClick: testConnection, title: "OneDrive-Anbindung prüfen" }, busy === "test" ? "…" : "Testen"),
         // aktiv-Toggle
         h("button", {
           onClick: () => toggleActive(b),
@@ -106,7 +119,7 @@
                 h("input", { value: nDrive, onChange: e => setNDrive(e.target.value), placeholder: "Drive-ID (von Michel)", style: { ...input, flex: 1, minWidth: 160 } }),
                 h("input", { value: nFolder, onChange: e => setNFolder(e.target.value), placeholder: "Ordnerpfad, z. B. /Bilddatenbank", style: { ...input, flex: 1, minWidth: 160 } })),
               nType === "onedrive" && h("div", { style: { fontSize: 11, color: "var(--muted)", lineHeight: 1.6 } },
-                "Drive-ID/Ordner kommen von Michel. Das Backend wird zunächst inaktiv angelegt; die echte OneDrive-Anbindung (Upload/Download über Microsoft Graph) folgt in Phase 2."),
+                "OneDrive ist angebunden (picpop-test@phaeno.de / Ordner 'Media'). Drive-ID optional — der Zugriff ist serverseitig fest verdrahtet. Nach dem Anlegen 'Testen' klicken, dann aktivieren und als Standard setzen, damit neue Uploads dorthin gehen."),
               h("div", { style: { display: "flex", gap: 8 } },
                 h("button", { className: "btn sm primary", onClick: addBackend }, "Anlegen"),
                 h("button", { className: "btn sm", onClick: () => setAdding(false) }, "Abbrechen")))),

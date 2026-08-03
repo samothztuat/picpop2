@@ -45,7 +45,8 @@ function assetFilename(a) {
 }
 
 async function fetchAndDownload(a) {
-  const url = a.storageUrl;
+  // Original-URL auflösen (Firebase: direkt · OneDrive: kurzlebige Graph-URL)
+  const url = window.resolveOriginalUrl ? await window.resolveOriginalUrl(a) : a.storageUrl;
   if (!url) return;
   const fname = assetFilename(a);
   try {
@@ -70,7 +71,7 @@ async function fetchAndDownload(a) {
 }
 
 async function bulkDownload(assets) {
-  const valid = (assets || []).filter(a => a && a.storageUrl);
+  const valid = (assets || []).filter(a => a && (a.storageUrl || a.storageRef?.itemId));
   if (valid.length === 0) return;
   if (valid.length === 1) { await fetchAndDownload(valid[0]); return; }
   if (valid.length < 10) {
@@ -84,7 +85,8 @@ async function bulkDownload(assets) {
   const seen = {};
   for (const a of valid) {
     try {
-      const resp = await fetch(a.storageUrl);
+      const u = window.resolveOriginalUrl ? await window.resolveOriginalUrl(a) : a.storageUrl;
+      const resp = await fetch(u);
       const blob = await resp.blob();
       let fname = assetFilename(a);
       if (seen[fname]) { seen[fname]++; fname = fname.replace(/(\.\w+)$/, `_${seen[fname]}$1`); }

@@ -536,11 +536,55 @@ function filterByBackend(assets) {
   if (!active) return assets || [];
   return (assets || []).filter(a => active.has(a.storageBackend || DEFAULT_BACKEND_ID));
 }
-// Standard-Ziel für neue Uploads.
-function defaultBackendId() {
+// Standard-Ziel für neue Uploads (Objekt bzw. ID).
+function defaultBackend() {
   const list = window.STORAGE_BACKENDS || [];
-  const def = list.find(b => b.isDefault && b.active) || list.find(b => b.active);
-  return def ? def.id : DEFAULT_BACKEND_ID;
+  return list.find(b => b.isDefault && b.active) || list.find(b => b.active) || { id: DEFAULT_BACKEND_ID, type: "firebase" };
+}
+function defaultBackendId() { return defaultBackend().id; }
+function backendById(id) { return (window.STORAGE_BACKENDS || []).find(b => b.id === id) || null; }
+
+// ── OneDrive (Microsoft Graph) — Aufrufe der Cloud Functions ─────────────────
+async function fnMsTestConnection() {
+  return (await window._picpopFunctions.httpsCallable("msTestConnection")()).data;
+}
+async function fnMsCreateUploadSession(filename, assetId) {
+  return (await window._picpopFunctions.httpsCallable("msCreateUploadSession")({ filename, assetId })).data;
+}
+async function fnMsGetDownloadUrl(itemId) {
+  return (await window._picpopFunctions.httpsCallable("msGetDownloadUrl")({ itemId })).data;
+}
+// Datei per Upload-Session (chunked) direkt ins OneDrive laden → gibt driveItem zurück.
+async function uploadToOneDrive(file, assetId, onProgress) {
+  const { uploadUrl } = await fnMsCreateUploadSession(file.name, assetId);
+  const CHUNK = 320 * 1024 * 20; // 6,4 MB (Vielfaches von 320 KiB, Graph-Vorgabe)
+  const total = file.size;
+  let start = 0, last = null;
+  while (start < total) {
+    const end = Math.min(start + CHUNK, total);
+    const res = await fetch(uploadUrl, {
+      method: "PUT",
+      headers: { "Content-Range": `bytes ${start}-${end - 1}/${total}` },
+      body: file.slice(start, end),
+    });
+    if (res.status === 200 || res.status === 201) last = await res.json();
+    else if (res.status !== 202) throw new Error("OneDrive-Upload HTTP " + res.status);
+    start = end;
+    onProgress?.(Math.round(end / total * 100));
+  }
+  if (!last?.id) throw new Error("OneDrive-Upload ohne Item-ID abgeschlossen");
+  return last; // { id, name, size, parentReference:{driveId}, ... }
+}
+// Liefert die anzeigbare/herunterladbare URL des ORIGINALS (Firebase: direkt;
+// OneDrive: kurzlebige Graph-Download-URL).
+async function resolveOriginalUrl(asset) {
+  if (!asset) return null;
+  const b = backendById(asset.storageBackend);
+  if (b && b.type === "onedrive" && asset.storageRef?.itemId) {
+    const r = await fnMsGetDownloadUrl(asset.storageRef.itemId);
+    return r.downloadUrl;
+  }
+  return asset.storageUrl || null;
 }
 
 // ── Gruppen ──────────────────────────────────────────────────────────────────
@@ -785,19 +829,23 @@ async function uploadAsset(file, folderId, tags = [], onProgress = null, author 
   const id = "a-" + Date.now() + "-" + Math.random().toString(36).slice(2, 6);
   const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
   const ext = file.name.split(".").pop().toLowerCase();
-  const storagePath = `tenants/${window.TENANT_ID}/assets/${id}/${file.name}`;
-  const ref = storage.ref(storagePath);
-
-  await new Promise((resolve, reject) => {
-    const task = ref.put(file);
-    task.on("state_changed",
-      (snap) => { onProgress?.(Math.round(snap.bytesTransferred / snap.totalBytes * 100)); },
-      reject,
-      resolve
-    );
-  });
-
-  const storageUrl = await ref.getDownloadURL();
+  // Ziel-Backend für das ORIGINAL bestimmen (Thumbnail geht immer zu Firebase).
+  const backend = defaultBackend();
+  let storageUrl = null, storagePath = null, storageRef = null;
+  if (backend.type === "onedrive") {
+    const item = await uploadToOneDrive(file, id, onProgress);
+    storageRef = { itemId: item.id, driveId: item.parentReference?.driveId || null, name: item.name };
+  } else {
+    storagePath = `tenants/${window.TENANT_ID}/assets/${id}/${file.name}`;
+    const ref = storage.ref(storagePath);
+    await new Promise((resolve, reject) => {
+      const task = ref.put(file);
+      task.on("state_changed",
+        (snap) => { onProgress?.(Math.round(snap.bytesTransferred / snap.totalBytes * 100)); },
+        reject, resolve);
+    });
+    storageUrl = await ref.getDownloadURL();
+  }
 
   let width = 0, height = 0, ratio = 1.5;
   let pages = 1;
@@ -942,8 +990,9 @@ async function uploadAsset(file, folderId, tags = [], onProgress = null, author 
     tags: finalTags,
     storageUrl,
     storagePath,
+    storageRef,                    // OneDrive: { itemId, driveId, name } — sonst null
     thumbnailUrl,
-    storageBackend: defaultBackendId(), // in welchem Backend liegt das Original
+    storageBackend: backend.id,    // in welchem Backend liegt das Original
     size: parseFloat((file.size / 1024 / 1024).toFixed(1)),
     date: new Date().toISOString(),
     takenAt,
@@ -1015,7 +1064,8 @@ Object.assign(window, {
   subscribeToBereiche, dbSaveBereiche,
   subscribeToStorageBackends, ensureDefaultBackend, dbSaveStorageBackend, dbDeleteStorageBackend,
   dbSetStorageBackendActive, dbSetDefaultStorageBackend, filterByBackend, activeBackendIds, defaultBackendId,
-  DEFAULT_BACKEND_ID,
+  defaultBackend, backendById, DEFAULT_BACKEND_ID,
+  fnMsTestConnection, fnMsCreateUploadSession, fnMsGetDownloadUrl, uploadToOneDrive, resolveOriginalUrl,
   subscribeToGroups, dbSaveGroup, dbDeleteGroup, parseGroupsCsv,
   fnListTenantUsers, fnSetUserGroups, fnSetUserRole, fnRefreshTenantClaims, fnPurgeTenantUsers,
   regenerateThumbnail,
