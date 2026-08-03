@@ -45,14 +45,22 @@ function odBase() { return `${GRAPH}/users/${encodeURIComponent(OD_USER)}/drive`
 
 // Verbindungstest + Media-Ordner-Info (nur Superadmin).
 exports.msTestConnection = onCall({ region: REGION, secrets: [MS_CLIENT_SECRET] }, async (req) => {
+  console.log("[msTestConnection] aufgerufen von", req.auth?.token?.email);
   if (req.auth?.token?.email !== SUPERADMIN_EMAIL) throw new HttpsError("permission-denied", "Nur Superadmin.");
-  const tok = await graphToken();
-  const r = await fetch(`${odBase()}?$select=id,driveType,quota`, { headers: { Authorization: `Bearer ${tok}` } });
-  const d = await r.json();
-  if (d.error) throw new HttpsError("internal", d.error.message);
-  const fr = await fetch(`${odBase()}/root:/${OD_FOLDER}`, { headers: { Authorization: `Bearer ${tok}` } });
-  const fd = await fr.json();
-  return { driveId: d.id, driveType: d.driveType, quota: d.quota || null, user: OD_USER, folder: OD_FOLDER, folderId: fd.id || null };
+  try {
+    const tok = await graphToken();
+    const r = await fetch(`${odBase()}?$select=id,driveType,quota`, { headers: { Authorization: `Bearer ${tok}` } });
+    const d = await r.json();
+    if (d.error) throw new HttpsError("internal", d.error.message);
+    const fr = await fetch(`${odBase()}/root:/${OD_FOLDER}`, { headers: { Authorization: `Bearer ${tok}` } });
+    const fd = await fr.json();
+    const out = { driveId: d.id, driveType: d.driveType, quota: d.quota || null, user: OD_USER, folder: OD_FOLDER, folderId: fd.id || null };
+    console.log("[msTestConnection] OK", JSON.stringify(out).slice(0, 200));
+    return out;
+  } catch (e) {
+    console.error("[msTestConnection] FEHLER", e.message);
+    throw (e instanceof HttpsError ? e : new HttpsError("internal", e.message));
+  }
 });
 
 // Upload-Session anlegen → der Browser lädt die Datei direkt zur zurückgegebenen

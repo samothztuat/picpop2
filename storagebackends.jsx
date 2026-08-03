@@ -15,6 +15,7 @@
     const [nFolder, setNFolder] = useState("");
     const [toast, setToast] = useState("");
     const [busy, setBusy] = useState("");
+    const [testResult, setTestResult] = useState(null); // { ok, msg }
 
     useEffect(() => {
       window.ensureDefaultBackend?.().catch(() => {});
@@ -25,12 +26,19 @@
     function flash(m) { setToast(m); setTimeout(() => setToast(""), 5000); }
 
     async function testConnection() {
-      setBusy("test");
+      setBusy("test"); setTestResult({ ok: null, msg: "Verbindung wird geprüft…" });
       try {
+        console.log("[picpop] OneDrive-Test startet…");
         const r = await window.fnMsTestConnection();
+        console.log("[picpop] OneDrive-Test Ergebnis:", r);
         const freeGB = r.quota ? Math.round((r.quota.total - r.quota.used) / 1e9) : "?";
-        flash(`✓ Verbunden mit ${r.user} · Ordner „${r.folder}" ${r.folderId ? "vorhanden" : "FEHLT"} · ${freeGB} GB frei`);
-      } catch (e) { flash("✗ Verbindung fehlgeschlagen: " + (e.message || e)); }
+        const msg = `Verbunden mit ${r.user} · Ordner '${r.folder}' ${r.folderId ? "vorhanden" : "FEHLT"} · ${freeGB} GB frei`;
+        setTestResult({ ok: true, msg }); flash("✓ " + msg);
+      } catch (e) {
+        console.error("[picpop] OneDrive-Test Fehler:", e);
+        const msg = (e && (e.message || e.code)) ? (e.message || e.code) : String(e);
+        setTestResult({ ok: false, msg }); flash("✗ " + msg);
+      }
       setBusy("");
     }
 
@@ -75,6 +83,16 @@
 
     return h("div", { style: { maxWidth: 720 } },
       toast && h("div", { style: { position: "fixed", bottom: 20, left: "50%", transform: "translateX(-50%)", background: "var(--fg)", color: "var(--bg)", padding: "8px 16px", borderRadius: 6, fontSize: 13, zIndex: 100 } }, toast),
+
+      // Dauerhaft sichtbares Testergebnis
+      testResult && h("div", { style: {
+        marginBottom: 14, padding: "10px 14px", borderRadius: 6, fontSize: 13, lineHeight: 1.5,
+        border: "1px solid " + (testResult.ok === true ? "#2f7d5b" : testResult.ok === false ? "#c0392b" : "var(--line-strong)"),
+        background: testResult.ok === true ? "color-mix(in srgb,#2f7d5b 10%,transparent)" : testResult.ok === false ? "color-mix(in srgb,#c0392b 8%,transparent)" : "var(--hover)",
+        color: testResult.ok === false ? "#c0392b" : "var(--fg)",
+      } },
+        h("b", null, testResult.ok === true ? "✓ OneDrive verbunden — " : testResult.ok === false ? "✗ Test fehlgeschlagen — " : "⏳ "),
+        testResult.msg),
 
       h("div", { style: { fontSize: 12, color: "var(--muted)", lineHeight: 1.7, marginBottom: 16, padding: "10px 14px", background: "var(--hover)", borderRadius: 6 } },
         "Legt fest, ", h("b", null, "wo die Original-Dateien"), " dieses Mandanten liegen. ",
