@@ -20,6 +20,7 @@
     const [deleteSource, setDeleteSource] = useState(true);
     const [mig, setMig] = useState(null);               // Fortschritt { done, total, errors, mbDone, mbTotal, current, running, log }
     const [armed, setArmed] = useState(false);          // inline-Bestätigung vor Start
+    const [quota, setQuota] = useState(null);           // OneDrive-Speicherplatz { total, used, remaining }
     const stopRef = useRef(false);
 
     useEffect(() => {
@@ -27,6 +28,14 @@
       const unsub = window.subscribeToStorageBackends(setBackends);
       return () => unsub && unsub();
     }, []);
+
+    async function loadQuota() {
+      try { const r = await window.fnMsTestConnection(); if (r.quota) setQuota(r.quota); } catch (_) {}
+    }
+    // Speicherplatz automatisch laden, sobald ein OneDrive-Backend existiert
+    useEffect(() => {
+      if (!quota && backends.some(b => b.type === "onedrive")) loadQuota();
+    }, [backends]);
 
     function flash(m) { setToast(m); setTimeout(() => setToast(""), 5000); }
 
@@ -86,6 +95,7 @@
         console.log("[picpop] OneDrive-Test startet…");
         const r = await window.fnMsTestConnection();
         console.log("[picpop] OneDrive-Test Ergebnis:", r);
+        if (r.quota) setQuota(r.quota);
         const freeGB = r.quota ? Math.round((r.quota.total - r.quota.used) / 1e9) : "?";
         const msg = `Verbunden mit ${r.user} · Ordner '${r.folder}' ${r.folderId ? "vorhanden" : "FEHLT"} · ${freeGB} GB frei`;
         setTestResult({ ok: true, msg }); flash("✓ " + msg);
@@ -153,6 +163,36 @@
         "Legt fest, ", h("b", null, "wo die Original-Dateien"), " dieses Mandanten liegen. ",
         h("b", null, "Metadaten, Tags und Vorschaubilder bleiben immer auf Firebase"), " (zentral gesichert). ",
         "Nur Assets ", h("b", null, "aktiver"), " Backends werden im Client angezeigt. Neue Uploads gehen ins ", h("b", null, "Standard"), "-Backend."),
+
+      // ── OneDrive-Speicherplatz ──
+      backends.some(b => b.type === "onedrive") && (() => {
+        const gb = n => (n / 1e9).toFixed(1);
+        const total = quota ? quota.total : 0;
+        const used = quota ? quota.used : 0;
+        const free = quota ? (quota.remaining != null ? quota.remaining : total - used) : 0;
+        const pct = total ? Math.min(100, Math.round(used / total * 100)) : 0;
+        // „passt die Migration rein?"
+        const needGB = estimate ? estimate.totalGB : 0;
+        const afterFree = free / 1e9 - needGB;
+        const tight = estimate && afterFree < 0;
+        return h("div", { style: { border: "1px solid var(--line)", borderRadius: 8, padding: "12px 14px", marginBottom: 14, background: "var(--panel)" } },
+          h("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, flexWrap: "wrap", gap: 8 } },
+            h("span", { style: { fontSize: 13, fontWeight: 600 } }, "OneDrive-Speicherplatz"),
+            h("button", { className: "btn sm", disabled: busy === "test", onClick: loadQuota }, busy === "test" ? "…" : "Aktualisieren")),
+          quota
+            ? h("div", null,
+                h("div", { style: { height: 8, background: "var(--line)", borderRadius: 4, overflow: "hidden" } },
+                  h("div", { style: { height: "100%", width: pct + "%", background: pct > 90 ? "#c0392b" : pct > 75 ? "#dbab52" : "#0067b8", transition: "width .3s" } })),
+                h("div", { style: { display: "flex", gap: 16, flexWrap: "wrap", fontSize: 12.5, color: "var(--muted)", marginTop: 8, fontFamily: "var(--font-mono)" } },
+                  h("span", null, h("b", { style: { color: "var(--fg)" } }, gb(used) + " GB"), " belegt"),
+                  h("span", null, h("b", { style: { color: "#0067b8" } }, gb(free) + " GB"), " frei"),
+                  h("span", null, gb(total) + " GB gesamt", " (", pct, "%)")),
+                estimate && h("div", { style: { fontSize: 12, marginTop: 8, color: tight ? "#c0392b" : "var(--muted)" } },
+                  tight
+                    ? `⚠ Migration braucht ${needGB.toFixed(1)} GB — das übersteigt den freien Platz um ${Math.abs(afterFree).toFixed(1)} GB.`
+                    : `Migration braucht ~${needGB.toFixed(1)} GB → danach noch ~${afterFree.toFixed(1)} GB frei.`))
+            : h("div", { style: { fontSize: 12.5, color: "var(--muted)" } }, "Wird geladen… (falls nichts erscheint: 'Aktualisieren')"));
+      })(),
 
       // Liste
       backends.map(b => h("div", { key: b.id, style: { display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", padding: "14px 0", borderTop: "1px solid var(--line)" } },
