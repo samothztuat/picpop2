@@ -19,6 +19,7 @@
     const [estimate, setEstimate] = useState(null);     // { count, totalGB }
     const [deleteSource, setDeleteSource] = useState(true);
     const [mig, setMig] = useState(null);               // Fortschritt { done, total, errors, mbDone, mbTotal, current, running, log }
+    const [armed, setArmed] = useState(false);          // inline-Bestätigung vor Start
     const stopRef = useRef(false);
 
     useEffect(() => {
@@ -39,11 +40,13 @@
     }
 
     async function runMigration() {
+      setArmed(false);
       const target = backends.find(b => b.type === "onedrive" && b.active) || backends.find(b => b.type === "onedrive");
-      if (!target) { flash("Kein OneDrive-Backend vorhanden — erst anlegen."); return; }
-      const e = await window.estimateMigration();
+      if (!target) { flash("Kein OneDrive-Backend vorhanden — erst anlegen & aktivieren."); return; }
+      let e;
+      try { e = await window.estimateMigration(); }
+      catch (err) { flash("Fehler beim Vorbereiten: " + (err.message || err)); return; }
       if (e.count === 0) { flash("Keine Bilder auf Firebase zu übertragen."); return; }
-      if (!confirm(`${e.count} Bilder (${e.totalGB.toFixed(1)} GB) nach OneDrive übertragen?` + (deleteSource ? "\nFirebase-Originale werden nach erfolgreicher Übertragung gelöscht." : "\nFirebase-Originale bleiben erhalten (Kopie).") + "\n\nBitte den Browser-Tab bis zum Ende geöffnet lassen.")) return;
       stopRef.current = false;
       let done = 0, errors = 0, mbDone = 0;
       const mbTotal = e.totalMB;
@@ -218,11 +221,18 @@
         h("label", { style: { display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, color: "var(--fg-2)", marginBottom: 12, cursor: "pointer" } },
           h("input", { type: "checkbox", checked: deleteSource, onChange: e => setDeleteSource(e.target.checked) }),
           "Firebase-Originale nach erfolgreicher Übertragung löschen (Speicher freigeben)"),
-        // Start / Stop
-        h("div", { style: { display: "flex", gap: 8 } },
-          mig?.running
-            ? h("button", { className: "btn sm", onClick: () => { stopRef.current = true; } }, "⏹ Stoppen")
-            : h("button", { className: "btn sm primary", onClick: runMigration }, "▶ Übertragung starten")),
+        // Start / Bestätigen / Stop (ohne Browser-Dialog)
+        mig?.running
+          ? h("button", { className: "btn sm", onClick: () => { stopRef.current = true; } }, "⏹ Stoppen")
+          : armed
+            ? h("div", { style: { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", background: "color-mix(in srgb,#c0392b 7%,transparent)", border: "1px solid #c0392b", borderRadius: 6, padding: "8px 12px" } },
+                h("span", { style: { fontSize: 12.5 } },
+                  estimate ? `${estimate.count} Bilder (${estimate.totalGB.toFixed(2)} GB) übertragen — ` : "Übertragen — ",
+                  deleteSource ? "Firebase-Originale werden danach gelöscht. " : "Firebase-Originale bleiben (Kopie). ",
+                  "Tab bis zum Ende offen lassen."),
+                h("button", { className: "btn sm primary", onClick: runMigration }, "Ja, jetzt übertragen"),
+                h("button", { className: "btn sm", onClick: () => setArmed(false) }, "Abbrechen"))
+            : h("button", { className: "btn sm primary", onClick: async () => { if (!estimate) await refreshEstimate(); setArmed(true); } }, "▶ Übertragung starten"),
         // Fortschritt
         mig && h("div", { style: { marginTop: 12 } },
           h("div", { style: { height: 6, background: "var(--line)", borderRadius: 3, overflow: "hidden" } },
