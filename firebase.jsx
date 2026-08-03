@@ -544,6 +544,38 @@ function defaultBackend() {
 function defaultBackendId() { return defaultBackend().id; }
 function backendById(id) { return (window.STORAGE_BACKENDS || []).find(b => b.id === id) || null; }
 
+// Ermittelt den Speicherort des ORIGINALS eines Assets — aus dem gesetzten
+// storageBackend, sonst aus Indizien (OneDrive-Referenz vs. Firebase-URL).
+function storageInfo(asset) {
+  const b = asset?.storageBackend ? backendById(asset.storageBackend) : null;
+  if (b) return { id: b.id, type: b.type, name: b.name };
+  if (asset?.storageRef?.itemId) return { id: "onedrive", type: "onedrive", name: "OneDrive" };
+  if (asset?.storageUrl || asset?.storagePath) return { id: DEFAULT_BACKEND_ID, type: "firebase", name: "Firebase" };
+  return { id: null, type: "unbekannt", name: "unbekannt" };
+}
+
+// Nachträgliches Ermitteln/Setzen des storageBackend-Feldes für den Bestand.
+// forceAll=false: nur Assets OHNE Feld. forceAll=true: alle neu aus Indizien ableiten.
+async function dbBackfillStorageBackends(forceAll = false) {
+  const snap = await tenantCol("assets").get();
+  const onedrive = (window.STORAGE_BACKENDS || []).find(b => b.type === "onedrive");
+  let updated = 0, already = 0;
+  let batch = db.batch(), n = 0;
+  for (const doc of snap.docs) {
+    const a = doc.data();
+    if (a.storageBackend && !forceAll) { already++; continue; }
+    const derived = a.storageRef?.itemId
+      ? (onedrive ? onedrive.id : "onedrive")
+      : DEFAULT_BACKEND_ID;                 // Altbestand ohne Referenz → Firebase
+    if (a.storageBackend === derived) { already++; continue; }
+    batch.set(doc.ref, { storageBackend: derived }, { merge: true });
+    updated++;
+    if (++n >= 400) { await batch.commit(); batch = db.batch(); n = 0; }
+  }
+  if (n > 0) await batch.commit();
+  return { total: snap.size, updated, already };
+}
+
 // ── OneDrive (Microsoft Graph) — Aufrufe der Cloud Functions ─────────────────
 async function fnMsTestConnection() {
   return (await window._picpopFunctions.httpsCallable("msTestConnection")()).data;
@@ -554,18 +586,18 @@ async function fnMsCreateUploadSession(filename, assetId) {
 async function fnMsGetDownloadUrl(itemId) {
   return (await window._picpopFunctions.httpsCallable("msGetDownloadUrl")({ itemId })).data;
 }
-// Datei per Upload-Session (chunked) direkt ins OneDrive laden → gibt driveItem zurück.
-async function uploadToOneDrive(file, assetId, onProgress) {
-  const { uploadUrl } = await fnMsCreateUploadSession(file.name, assetId);
+// Blob/Datei per Upload-Session (chunked) ins OneDrive laden → gibt driveItem zurück.
+async function uploadBlobToOneDrive(blob, filename, assetId, onProgress) {
+  const { uploadUrl } = await fnMsCreateUploadSession(filename, assetId);
   const CHUNK = 320 * 1024 * 20; // 6,4 MB (Vielfaches von 320 KiB, Graph-Vorgabe)
-  const total = file.size;
+  const total = blob.size;
   let start = 0, last = null;
   while (start < total) {
     const end = Math.min(start + CHUNK, total);
     const res = await fetch(uploadUrl, {
       method: "PUT",
       headers: { "Content-Range": `bytes ${start}-${end - 1}/${total}` },
-      body: file.slice(start, end),
+      body: blob.slice(start, end),
     });
     if (res.status === 200 || res.status === 201) last = await res.json();
     else if (res.status !== 202) throw new Error("OneDrive-Upload HTTP " + res.status);
@@ -574,6 +606,9 @@ async function uploadToOneDrive(file, assetId, onProgress) {
   }
   if (!last?.id) throw new Error("OneDrive-Upload ohne Item-ID abgeschlossen");
   return last; // { id, name, size, parentReference:{driveId}, ... }
+}
+async function uploadToOneDrive(file, assetId, onProgress) {
+  return uploadBlobToOneDrive(file, file.name, assetId, onProgress);
 }
 // Liefert die anzeigbare/herunterladbare URL des ORIGINALS (Firebase: direkt;
 // OneDrive: kurzlebige Graph-Download-URL).
@@ -585,6 +620,46 @@ async function resolveOriginalUrl(asset) {
     return r.downloadUrl;
   }
   return asset.storageUrl || null;
+}
+
+// ── Migration Firebase → OneDrive ────────────────────────────────────────────
+// Assets, deren ORIGINAL noch auf Firebase liegt (Kandidaten für den Transfer).
+async function listMigratableAssets() {
+  const snap = await tenantCol("assets").get();
+  return snap.docs.map(d => d.data()).filter(a => {
+    const si = storageInfo(a);
+    return si.type === "firebase" && (a.storageUrl || a.storagePath);
+  });
+}
+// Vorab-Schätzung: Anzahl + Gesamtgröße der zu übertragenden Originale.
+async function estimateMigration() {
+  const list = await listMigratableAssets();
+  const totalMB = list.reduce((s, a) => s + (Number(a.size) || 0), 0);
+  return { count: list.length, totalMB, totalGB: totalMB / 1024, assets: list };
+}
+// Ein Asset übertragen: Original aus Firebase laden → ins OneDrive hochladen →
+// Verknüpfung am Asset umbiegen (storageBackend/storageRef). Thumbnail + Metadaten
+// bleiben unangetastet auf Firebase. deleteSource=true entfernt danach das Firebase-
+// Original (gibt Speicher frei) — erst NACH erfolgreichem Upload + Doc-Update.
+async function migrateAssetToOneDrive(asset, onedriveBackendId, deleteSource) {
+  const url = asset.storageUrl || (asset.storagePath ? await storage.ref(asset.storagePath).getDownloadURL() : null);
+  if (!url) throw new Error("kein Firebase-Original");
+  const resp = await fetch(url);
+  if (!resp.ok) throw new Error("Download HTTP " + resp.status);
+  const blob = await resp.blob();
+  const filename = asset.storagePath ? asset.storagePath.split("/").pop() : ((asset.title || asset.id) + "." + (asset.format || "jpg").toLowerCase());
+  const item = await uploadBlobToOneDrive(blob, filename, asset.id);
+  const storageRef = { itemId: item.id, driveId: item.parentReference?.driveId || null, name: item.name };
+  const patch = { storageBackend: onedriveBackendId, storageRef };
+  await tenantCol("assets").doc(asset.id).update(patch);
+  // Erst nach erfolgreichem Umbiegen das Firebase-Original löschen
+  if (deleteSource && asset.storagePath) {
+    try {
+      await storage.ref(asset.storagePath).delete();
+      await tenantCol("assets").doc(asset.id).update({ storageUrl: null, storagePath: null });
+    } catch (e) { console.warn("[migration] Firebase-Löschung", asset.id, e.message); }
+  }
+  return { bytes: blob.size };
 }
 
 // ── Gruppen ──────────────────────────────────────────────────────────────────
@@ -1064,8 +1139,9 @@ Object.assign(window, {
   subscribeToBereiche, dbSaveBereiche,
   subscribeToStorageBackends, ensureDefaultBackend, dbSaveStorageBackend, dbDeleteStorageBackend,
   dbSetStorageBackendActive, dbSetDefaultStorageBackend, filterByBackend, activeBackendIds, defaultBackendId,
-  defaultBackend, backendById, DEFAULT_BACKEND_ID,
-  fnMsTestConnection, fnMsCreateUploadSession, fnMsGetDownloadUrl, uploadToOneDrive, resolveOriginalUrl,
+  defaultBackend, backendById, DEFAULT_BACKEND_ID, storageInfo, dbBackfillStorageBackends,
+  fnMsTestConnection, fnMsCreateUploadSession, fnMsGetDownloadUrl, uploadToOneDrive, uploadBlobToOneDrive, resolveOriginalUrl,
+  listMigratableAssets, estimateMigration, migrateAssetToOneDrive,
   subscribeToGroups, dbSaveGroup, dbDeleteGroup, parseGroupsCsv,
   fnListTenantUsers, fnSetUserGroups, fnSetUserRole, fnRefreshTenantClaims, fnPurgeTenantUsers,
   regenerateThumbnail,

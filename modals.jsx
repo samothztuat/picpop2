@@ -608,6 +608,19 @@ function AssetDetailModal({ open, asset: assetProp, peerAssets, onNavigate, onCl
               )}
               <span style={{ color: "var(--muted)" }}>{lang === "de" ? "Dateigröße" : "File size"}</span>
               <span className="num">{asset.size} MB</span>
+              {(() => {
+                const si = window.storageInfo ? window.storageInfo(asset) : { type: "firebase", name: "Firebase" };
+                const isOD = si.type === "onedrive";
+                return (
+                  <>
+                    <span style={{ color: "var(--muted)" }}>{lang === "de" ? "Speicherort" : "Storage"}</span>
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
+                      <span style={{ width: 7, height: 7, borderRadius: "50%", background: isOD ? "#0067b8" : si.type === "firebase" ? "#e8912a" : "var(--faint)" }} />
+                      {si.name}{isOD && asset.storageRef?.name ? <span style={{ color: "var(--muted)" }}> · Media/{asset.storageRef.name}</span> : null}
+                    </span>
+                  </>
+                );
+              })()}
               <span style={{ color: "var(--muted)" }}>{t("embargo")}</span>
               <span>{asset.embargo ? window.fmtDate(asset.embargo, lang) : t("no_embargo")}</span>
             </div>
