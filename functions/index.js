@@ -88,7 +88,8 @@ exports.msGetDownloadUrl = onCall({ region: REGION, secrets: [MS_CLIENT_SECRET] 
   const { itemId } = req.data || {};
   if (!itemId) throw new HttpsError("invalid-argument", "itemId fehlt.");
   const tok = await graphToken();
-  const r = await fetch(`${odBase()}/items/${encodeURIComponent(itemId)}?$select=id,name,size,@microsoft.graph.downloadUrl`, { headers: { Authorization: `Bearer ${tok}` } });
+  // Kein $select — sonst liefert Graph die @microsoft.graph.downloadUrl-Annotation nicht mit.
+  const r = await fetch(`${odBase()}/items/${encodeURIComponent(itemId)}`, { headers: { Authorization: `Bearer ${tok}` } });
   const d = await r.json();
   const url = d["@microsoft.graph.downloadUrl"];
   if (!url) throw new HttpsError("internal", "Download-URL: " + (d.error?.message || "nicht gefunden"));

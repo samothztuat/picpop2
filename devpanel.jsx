@@ -859,7 +859,7 @@ function DevPanel({ open, onClose }) {
 
   useEffectDP(() => {
     const unsub = DP_APP_DOCS_REF().onSnapshot((snap) => {
-      if (snap.exists()) {
+      if (snap.exists) {
         const d = snap.data();
         if (typeof d.content === 'string') setDocsContent(d.content);
         if (typeof d.updatedAt === 'number') setDocsUpdatedAt(d.updatedAt);
@@ -884,7 +884,7 @@ function DevPanel({ open, onClose }) {
 
   useEffectDP(() => {
     const unsub = DP_DOC_REF().onSnapshot((snap) => {
-      if (snap.exists()) {
+      if (snap.exists) {
         const d = snap.data();
         if (Array.isArray(d.requests)) {
           const sorted = d.requests.sort((a, b) => {
