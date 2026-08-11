@@ -614,8 +614,9 @@ async function uploadToOneDrive(file, assetId, onProgress) {
 // OneDrive: kurzlebige Graph-Download-URL).
 async function resolveOriginalUrl(asset) {
   if (!asset) return null;
-  const b = backendById(asset.storageBackend);
-  if (b && b.type === "onedrive" && asset.storageRef?.itemId) {
+  // OneDrive erkennbar an der Item-Referenz — unabhängig davon, ob das Backend-Doc
+  // gerade geladen ist. Sonst Firebase-URL.
+  if (asset.storageRef?.itemId) {
     const r = await fnMsGetDownloadUrl(asset.storageRef.itemId);
     return r.downloadUrl;
   }
