@@ -294,7 +294,8 @@ function AttrsBatchSection() {
       addLog(forceOverwrite ? 'Lade alle Fotos…' : 'Lade Fotos ohne Foto-Attribute…');
       const snap = await window.tenantCol('assets').get();
       const todo = snap.docs.map(d => d.data())
-        .filter(a => a.storageUrl && a.kind !== 'pdf' && a.area !== 'print')
+        // Thumbnail (Firebase) reicht für die KI — funktioniert auch für OneDrive-Bilder
+        .filter(a => (a.thumbnailUrl || a.storageUrl) && a.kind !== 'pdf' && a.area !== 'print')
         .filter(a => forceOverwrite || !a.photoAttrs?.length);
       addLog(`${todo.length} Fotos ${forceOverwrite ? 'gesamt' : 'ohne Attribute'}`);
       setProgress({ done: 0, total: todo.length, errors: 0 });
@@ -304,7 +305,7 @@ function AttrsBatchSection() {
         if (stopRef.current) { addLog('— Abgebrochen.', 'warn'); break; }
         addLog(`→ ${asset.title || asset.id}`);
         try {
-          const attrs = await window.analyzePhotoAttrsWithAI(asset.storageUrl, asset.ratio);
+          const attrs = await window.analyzePhotoAttrsWithAI(asset.thumbnailUrl || asset.storageUrl, asset.ratio);
           if (attrs?.length) {
             await window.tenantCol('assets').doc(asset.id).update({ photoAttrs: attrs });
             addLog(`  ✓ ${attrs.join(' · ')}`, 'success');
@@ -492,7 +493,8 @@ function KiBatchTab() {
       const allAssets = snapAll.docs.map(d => d.data());
 
       const todo = allAssets
-        .filter(a => (forceOverwrite || !a.aiDescription) && a.storageUrl)
+        // Thumbnail (Firebase) genügt für Bilder; PDFs brauchen das Original (Firebase oder OneDrive)
+        .filter(a => (forceOverwrite || !a.aiDescription) && (a.thumbnailUrl || a.storageUrl || a.storageRef?.itemId))
         .filter(a => a.kind === 'pdf' || a.kind === 'image' || !a.kind); // PDFs, Bilder, und Legacy-Assets ohne kind
 
       // Sortierung: PDFs zuerst, dann Print-Bilder, dann reguläre Fotos
@@ -522,7 +524,11 @@ function KiBatchTab() {
         const name = asset.title || asset.id;
         addLog(`→ ${typeLabel(asset)} ${name}`);
         try {
-          const desc = await fn(asset.storageUrl);
+          // Bilder: Thumbnail (Firebase, immer erreichbar). PDFs: Original (Firebase- oder OneDrive-URL).
+          const imgRef = asset.kind === 'pdf'
+            ? (asset.storageUrl || (window.resolveOriginalUrl ? await window.resolveOriginalUrl(asset) : null))
+            : (asset.thumbnailUrl || asset.storageUrl);
+          const desc = await fn(imgRef);
           if (desc) {
             await window.tenantCol('assets').doc(asset.id).update({ aiDescription: desc });
             addLog(`  ✓ ${desc.slice(0, 90)}${desc.length > 90 ? '…' : ''}`, 'success');
