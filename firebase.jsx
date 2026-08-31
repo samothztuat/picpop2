@@ -1015,12 +1015,14 @@ async function uploadAsset(file, folderId, tags = [], onProgress = null, author 
   // Bild in Images → Vision mit Bildbeschreibungs-Prompt
   let aiDescription = "";
   let photoAttrs = null;
-  if (storageUrl) {
+  // KI läuft, sobald IRGENDEINE Bildquelle vorliegt — auch bei OneDrive-Uploads
+  // (storageUrl ist dann null; wir nutzen das Thumbnail bzw. die Base64-Data-URL).
+  if (storageUrl || thumbnailUrl || aiImageDataUrl) {
     // Immer laden — gecachter leerer String würde sonst die Prüfung überspringen
     await loadAiConfig();
     const aiKey = window.AI_CONFIG?.openaiKey;
-    // Bevorzuge base64 data URL (Browser-lokal), Fallback auf Storage URL
-    const aiUrl = aiImageDataUrl || storageUrl;
+    // Bevorzuge base64 data URL (Browser-lokal), dann Firebase-Thumbnail, dann Storage-URL
+    const aiUrl = aiImageDataUrl || thumbnailUrl || storageUrl;
     console.log("[uploadAsset] AI key:", !!aiKey, "| dataUrl:", !!aiImageDataUrl, "| area:", area, "| isPdf:", isPdf);
     if (aiKey) {
       try {
