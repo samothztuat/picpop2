@@ -2,3 +2,8 @@
 *.log
 node_modules/
 .env
+
+# Erzeugt von projekt-snapshot — abgeleitet, nicht gepflegt.
+# Nicht versioniert, weil die Datei den Commit nennt, aus dem sie stammt:
+# im Repository wäre der Arbeitsbaum nach jedem Commit sofort wieder verändert.
+SNAPSHOT.md
