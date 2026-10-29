@@ -904,6 +904,7 @@ async function getFileDate(file) {
 async function uploadAsset(file, folderId, tags = [], onProgress = null, author = "", authorRole = "in_house", area = "images", batchId = null) {
   const id = "a-" + Date.now() + "-" + Math.random().toString(36).slice(2, 6);
   const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+  const isVideo = !isPdf && (file.type.startsWith("video/") || /\.(mp4|m4v|mov|webm|mkv|avi)$/i.test(file.name));
   const ext = file.name.split(".").pop().toLowerCase();
   // Ziel-Backend für das ORIGINAL bestimmen (Thumbnail geht immer zu Firebase).
   const backend = defaultBackend();
@@ -927,6 +928,7 @@ async function uploadAsset(file, folderId, tags = [], onProgress = null, author 
   let pages = 1;
   let widthMm = null, heightMm = null;
   let thumbnailUrl = null;
+  let duration = 0;
   let aiImageDataUrl = null; // base64 data URL of thumbnail — used for AI calls to avoid Storage URL issues
 
   if (isPdf) {
@@ -967,6 +969,40 @@ async function uploadAsset(file, folderId, tags = [], onProgress = null, author 
         ratio = 0.71;
         pages = 1;
       }
+    }
+  } else if (isVideo) {
+    // Poster-Frame im Browser ziehen (lokale Datei, kein CORS). Nicht dekodierbare Codecs (z. B. ProRes)
+    // führen zu keinem Thumbnail — das Video wird trotzdem angelegt.
+    try {
+      const blobUrl = URL.createObjectURL(file);
+      const vid = document.createElement("video");
+      vid.muted = true; vid.preload = "auto"; vid.playsInline = true;
+      await new Promise((res, rej) => {
+        vid.onloadedmetadata = res;
+        vid.onerror = () => rej(new Error("Video nicht dekodierbar"));
+        vid.src = blobUrl;
+      });
+      width = vid.videoWidth; height = vid.videoHeight;
+      ratio = width / height || 1.78;
+      duration = isFinite(vid.duration) ? vid.duration : 0;
+      // Frame bei ~10 % der Laufzeit (max. 5 s) — vermeidet schwarzen Anfangsframe
+      await new Promise((res, rej) => {
+        vid.onseeked = res;
+        vid.onerror = () => rej(new Error("Seek fehlgeschlagen"));
+        vid.currentTime = Math.min(5, (duration || 0) * 0.1);
+      });
+      const scale = Math.min(1, 800 / Math.max(width, height));
+      const cv = document.createElement("canvas");
+      cv.width = Math.round(width * scale); cv.height = Math.round(height * scale);
+      cv.getContext("2d").drawImage(vid, 0, 0, cv.width, cv.height);
+      aiImageDataUrl = cv.toDataURL("image/jpeg", 0.85);
+      const thumbBlob = await new Promise(r => cv.toBlob(r, "image/jpeg", 0.82));
+      const thumbRef = storage.ref(`tenants/${window.TENANT_ID}/thumbnails/${id}/thumb.jpg`);
+      await thumbRef.put(thumbBlob);
+      thumbnailUrl = await thumbRef.getDownloadURL();
+      URL.revokeObjectURL(blobUrl);
+    } catch (e) {
+      console.warn("[uploadAsset] video poster failed:", e.message);
     }
   } else {
     // Generate JPEG thumbnail from local file — no CORS issues, file still in memory.
@@ -1062,7 +1098,7 @@ async function uploadAsset(file, folderId, tags = [], onProgress = null, author 
   const asset = {
     id,
     title: file.name.replace(/\.[^.]+$/, ""),
-    kind: isPdf ? "pdf" : "image",
+    kind: isPdf ? "pdf" : isVideo ? "video" : "image",
     format: ext.toUpperCase(),
     folderId,
     tags: finalTags,
@@ -1085,7 +1121,7 @@ async function uploadAsset(file, folderId, tags = [], onProgress = null, author 
     photoAttrs: photoAttrs || [],
     campaign: "",
     embargo: null,
-    ...(isPdf ? { pages, ...(widthMm ? { widthMm, heightMm } : {}) } : { width, height }),
+    ...(isPdf ? { pages, ...(widthMm ? { widthMm, heightMm } : {}) } : { width, height, ...(isVideo ? { duration } : {}) }),
   };
 
   await tenantCol("assets").doc(id).set(asset);

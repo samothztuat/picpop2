@@ -198,7 +198,7 @@ function AssetImg({ asset, w = 800, h, style, className = "", alt = "" }) {
   // Wenn kein Thumbnail existiert, laden wir das Original crossOrigin, um daraus
   // ein Thumbnail erzeugen zu können. Schlägt CORS fehl, zeigen wir es ohne
   // crossOrigin nur an (ohne Selbstheilung).
-  const needsBackfill = !asset.thumbnailUrl && !!asset.storageUrl && asset.kind !== "pdf";
+  const needsBackfill = !asset.thumbnailUrl && !!asset.storageUrl && asset.kind !== "pdf" && asset.kind !== "video";
   const [coFailed, setCoFailed] = useState(false);
   const containerRef = useRef(null);
   const imgRef = useRef(null);
@@ -400,6 +400,26 @@ function FolderTile({ folder, onOpen, kind = "image", onMoveAssets }) {
   );
 }
 
+// Größen-Label für Hover/Details: PDFs in mm (Seitenformat), Bilder in px (+ mm bei 300 dpi), Videos Auflösung + Dauer
+function assetDimLabel(asset, opts = {}) {
+  if (!asset) return "";
+  const fmtDur = (sec) => { const s = Math.round(sec || 0); const m = Math.floor(s / 60); return m + ":" + String(s % 60).padStart(2, "0"); };
+  if (asset.kind === "pdf") {
+    return asset.widthMm && asset.heightMm ? `${asset.widthMm} × ${asset.heightMm} mm` : "";
+  }
+  if (asset.kind === "video") {
+    const parts = [];
+    if (asset.width && asset.height) parts.push(`${asset.width}×${asset.height}`);
+    if (asset.duration) parts.push(fmtDur(asset.duration));
+    return parts.join(" · ");
+  }
+  if (!asset.width || !asset.height) return "";
+  const mm = (px) => Math.round(px * 25.4 / 300);
+  return opts.withPx === false
+    ? `${mm(asset.width)} × ${mm(asset.height)} mm`
+    : `${asset.width}×${asset.height} px · ${mm(asset.width)} × ${mm(asset.height)} mm @300dpi`;
+}
+
 // AssetTile — draggable; dragIds = IDs to move (all selected if tile is in selection)
 function AssetTile({ asset, onOpen, selectable = false, selected = false, onToggleSelect, dragIds }) {
   const { lang = "de" } = React.useContext(window.LangCtx) || {};
@@ -529,6 +549,16 @@ function AssetTile({ asset, onOpen, selectable = false, selected = false, onTogg
           lineHeight: 1,
         }}>PDF</span>
       )}
+      {asset.kind === "video" && (
+        <span style={{
+          position: "absolute", bottom: 8, left: 8,
+          fontFamily: "var(--font-mono)", fontSize: 9, fontWeight: 600,
+          letterSpacing: "0.10em", textTransform: "uppercase",
+          padding: "3px 6px", display: "flex", alignItems: "center", gap: 4,
+          background: "rgba(0,0,0,0.55)", color: "rgba(255,255,255,0.92)",
+          backdropFilter: "blur(4px)", borderRadius: 3, pointerEvents: "none", lineHeight: 1,
+        }}>▶ VIDEO{asset.duration ? " · " + Math.floor(asset.duration/60) + ":" + String(Math.round(asset.duration)%60).padStart(2,"0") : ""}</span>
+      )}
       {asset.embargo && (
         <span className="badge chip" style={{ background: "rgba(0,0,0,0.7)", color: "white", borderColor: "transparent", bottom: 32 }}>
           <Icon.lock size={10} /> {asset.embargo}
@@ -539,9 +569,12 @@ function AssetTile({ asset, onOpen, selectable = false, selected = false, onTogg
         <div className="mono" style={{ opacity: 0.85, marginTop: 2 }}>
           {asset.kind === "pdf"
             ? `${asset.pages}p · ${asset.size}MB`
-            : `${(asset.width/1000).toFixed(1)}K · ${asset.format}`
+            : asset.kind === "video"
+              ? `${asset.format} · ${asset.size}MB`
+              : `${(asset.width/1000).toFixed(1)}K · ${asset.format}`
           }
         </div>
+        {(() => { const d = assetDimLabel(asset, { withPx: false }); return d ? <div className="mono" style={{ opacity: 0.85, marginTop: 2 }}>{d}</div> : null; })()}
       </div>
     </div>
   );
@@ -923,5 +956,5 @@ Object.assign(window, {
   fmtRel, fmtDate, userById, tagById, folderById, tagLabel, tagColor, tagBg,
   PH, PHDark, imgUrl, AssetImg, Avatar, AvatarStack, TagPill,
   FolderTile, AssetTile, Toast, Modal, SectionHeader, Empty, BulkBar,
-  useThumbSize, ThumbSizeSlider,
+  useThumbSize, ThumbSizeSlider, assetDimLabel,
 });

@@ -27,6 +27,8 @@ function AssetDetailModal({ open, asset: assetProp, peerAssets, onNavigate, onCl
   const [confirmDel, setConfirmDel] = useStateM(false);
   // Resolved original URL for assets stored on OneDrive (no direct storageUrl) — needed for the PDF viewer
   const [resolvedUrl, setResolvedUrl] = useStateM(null);
+  const videoRef = useRefM(null);
+  const videoRetryRef = useRefM(false);   // URL-Ablauf: genau ein Neuversuch
   // AI description
   const [aiDesc, setAiDesc] = useStateM(asset?.aiDescription ?? "");
   // Fotografische Attribute
@@ -38,7 +40,7 @@ function AssetDetailModal({ open, asset: assetProp, peerAssets, onNavigate, onCl
     if (!assetProp) return;
     clearTimeout(navTimerRef.current);
     setLocalAsset(null);
-    setResolvedUrl(null);
+    setResolvedUrl(null); videoRetryRef.current = false;
     setTags(assetProp.tags); setNotes(assetProp.notes || ""); setTitle(assetProp.title);
     setAiDesc(assetProp.aiDescription || "");
     setPhotoAttrs(assetProp.photoAttrs || []);
@@ -67,6 +69,20 @@ function AssetDetailModal({ open, asset: assetProp, peerAssets, onNavigate, onCl
     });
   }, [asset?.id, peerAssets]);
 
+  // Resolve OneDrive original URL for PDFs without a direct storageUrl (so the PDF viewer can load them)
+  useEffectM(() => {
+    let cancelled = false;
+    setResolvedUrl(null);
+    if (!open || !asset || (asset.kind !== "pdf" && asset.kind !== "video")) return;
+    if (asset.storageUrl) return;               // already a direct URL
+    if (!asset.storageRef?.itemId) return;      // nothing to resolve
+    if (!window.resolveOriginalUrl) return;
+    window.resolveOriginalUrl(asset).then(url => {
+      if (!cancelled && url) setResolvedUrl(url);
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [asset?.id]);
+
   // Focus input when picker opens
   useEffectM(() => {
     if (showTagPicker) setTimeout(() => newTagInputRef.current?.focus(), 60);
@@ -84,13 +100,26 @@ function AssetDetailModal({ open, asset: assetProp, peerAssets, onNavigate, onCl
     function handleKey(e) {
       if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
       // ArrowLeft / ArrowRight — asset navigation (images only; PDFs use their own page nav)
-      if (asset?.kind !== "pdf") {
+      if (asset?.kind === "video") {
+        // Video: Pfeiltasten spulen im Video (kein Asset-Wechsel, kein Nachladen). Ist das <video> selbst fokussiert,
+        // übernimmt der Browser das Spulen nativ → nicht doppelt ausführen.
+        const v = videoRef.current;
+        if (v && e.target !== v) {
+          if (e.key === "ArrowLeft")  { e.preventDefault(); v.currentTime = Math.max(0, v.currentTime - 5); }
+          if (e.key === "ArrowRight") { e.preventDefault(); v.currentTime = Math.min(v.duration || 1e9, v.currentTime + 5); }
+          if (e.key === " ")          { e.preventDefault(); v.paused ? v.play() : v.pause(); }
+        }
+      } else if (asset?.kind !== "pdf") {
         if (e.key === "ArrowLeft"  && prev) { navigate(prev); }
         if (e.key === "ArrowRight" && next) { navigate(next); }
       }
       // F — toggle fullscreen (image lightbox or PDF fullscreen)
       if (e.key === "f" || e.key === "F") {
         if (asset?.kind === "pdf") { setPdfFullscreen(v => !v); }
+        else if (asset?.kind === "video") {
+          const v = videoRef.current;
+          if (v) { document.fullscreenElement ? document.exitFullscreen() : v.requestFullscreen?.(); }
+        }
         else { setLightbox(v => !v); }
       }
       // Escape closes PDF fullscreen (image lightbox handled by Modal wrapper)
@@ -204,15 +233,18 @@ function AssetDetailModal({ open, asset: assetProp, peerAssets, onNavigate, onCl
   }
 
 
-  // Always show PDF viewer for real PDFs
-  const isPdfViewer = asset.kind === "pdf" && !!asset.storageUrl;
+  // Always show PDF viewer for real PDFs — URL may be a direct Firebase URL or a resolved OneDrive URL
+  const pdfUrl = asset.storageUrl || resolvedUrl;
+  const isPdfViewer = asset.kind === "pdf" && !!pdfUrl;
+  const isVideo = asset.kind === "video";
+  const videoUrl = isVideo ? (asset.storageUrl || resolvedUrl) : null;
 
 
   return (
     <>
     <window.Modal open={open} onClose={lightbox ? () => setLightbox(false) : pdfFullscreen ? () => setPdfFullscreen(false) : onClose} width={1584} padding={0} overflow="hidden">
       {/* Lightbox — fullscreen overlay */}
-      {lightbox && asset.kind !== "pdf" && (
+      {lightbox && asset.kind !== "pdf" && !isVideo && (
         <div
           style={{ position: "fixed", inset: 0, zIndex: 9900, background: "rgba(0,0,0,0.96)", display: "flex", alignItems: "center", justifyContent: "center" }}
           onClick={() => setLightbox(false)}
@@ -260,7 +292,7 @@ function AssetDetailModal({ open, asset: assetProp, peerAssets, onNavigate, onCl
             <window.Icon.x size={16} />
           </button>
           <div style={{ flex: 1, minHeight: 0 }}>
-            <window.PdfViewer url={asset.storageUrl} lang={lang} pages={asset.pages || 1} fullscreen />
+            <window.PdfViewer url={pdfUrl} lang={lang} pages={asset.pages || 1} fullscreen />
           </div>
         </div>
       )}
@@ -292,7 +324,7 @@ function AssetDetailModal({ open, asset: assetProp, peerAssets, onNavigate, onCl
 
           {/* Expand to fullscreen — images + PDFs */}
           <button
-            onClick={() => isPdfViewer ? setPdfFullscreen(true) : setLightbox(true)}
+            onClick={() => isPdfViewer ? setPdfFullscreen(true) : isVideo ? videoRef.current?.requestFullscreen?.() : setLightbox(true)}
             style={{ position: "absolute", top: 16, right: 16, zIndex: 2 }}
             className="btn icon ghost"
             title={lang === "de" ? "Vollbild (F)" : "Fullscreen (F)"}
@@ -301,9 +333,50 @@ function AssetDetailModal({ open, asset: assetProp, peerAssets, onNavigate, onCl
           </button>
 
           {isPdfViewer ? (
-            <window.PdfViewer url={asset.storageUrl} lang={lang} pages={asset.pages || 1} />
+            <window.PdfViewer url={pdfUrl} lang={lang} pages={asset.pages || 1} />
+          ) : isVideo ? (
+            // Video — natives Streaming per Range-Requests: Spulen lädt nur den Zielabschnitt nach, nie die ganze Datei
+            <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: 24, minHeight: 0, position: "relative" }}>
+              {videoUrl ? (
+                <video
+                  ref={videoRef}
+                  key={asset.id + (videoRetryRef.current ? "-r" : "")}
+                  src={videoUrl}
+                  poster={asset.thumbnailUrl || undefined}
+                  controls
+                  playsInline
+                  preload="metadata"
+                  controlsList="nodownload"
+                  disablePictureInPicture
+                  onContextMenu={e => e.preventDefault()}
+                  onError={async () => {
+                    // OneDrive-Links laufen nach ca. 1 h ab → einmal neu auflösen
+                    if (videoRetryRef.current || !asset.storageRef?.itemId || !window.resolveOriginalUrl) return;
+                    videoRetryRef.current = true;
+                    const u = await window.resolveOriginalUrl(asset, true).catch(() => null);
+                    if (u) setResolvedUrl(u);
+                  }}
+                  style={{ maxWidth: "100%", maxHeight: "100%", background: "#000", borderRadius: 2, outline: "none" }}
+                />
+              ) : asset.thumbnailUrl ? (
+                <img src={asset.thumbnailUrl} alt={asset.title} draggable={false} style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain", display: "block", opacity: 0.6 }} />
+              ) : (
+                <div style={{ width: "100%", maxWidth: 420, aspectRatio: asset.ratio || 1.78 }}><window.PHDark hue={asset.hue} label="" /></div>
+              )}
+            </div>
+          ) : asset.kind === "pdf" && asset.thumbnailUrl ? (
+            // OneDrive PDF — show the rendered first-page thumbnail while the original URL resolves for the viewer
+            <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: 24, minHeight: 0, position: "relative" }}>
+              <img
+                src={asset.thumbnailUrl}
+                alt={asset.title}
+                draggable={false}
+                decoding="async"
+                style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain", display: "block", boxShadow: "0 2px 16px -6px rgba(0,0,0,0.4)" }}
+              />
+            </div>
           ) : asset.kind === "pdf" ? (
-            // Mock PDF (no storageUrl) — placeholder centred
+            // Mock PDF (no source at all) — placeholder centred
             <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: 32 }}>
               <div style={{ width: "100%", maxWidth: 420, aspectRatio: asset.ratio || 0.71, position: "relative" }}>
                 <window.PHDark hue={asset.hue} label={asset.format} />
@@ -395,11 +468,23 @@ function AssetDetailModal({ open, asset: assetProp, peerAssets, onNavigate, onCl
             <div className="row" style={{ gap: 12, marginTop: 10, color: "var(--muted)", fontSize: 12 }}>
               <span>{window.fmtDate(asset.date, lang)}</span>
               <span>·</span>
-              <span className="num">{asset.kind === "pdf" ? `${asset.pages} ${t("pdf_pages",{n:asset.pages}).split(" ")[1]} · ${asset.size} MB` : `${asset.width}×${asset.height}`}</span>
+              <span className="num">{asset.kind === "pdf" ? `${asset.pages} ${t("pdf_pages",{n:asset.pages}).split(" ")[1]} · ${asset.size} MB` : isVideo ? `${asset.width || "?"}×${asset.height || "?"} · ${asset.size} MB` : `${asset.width}×${asset.height}`}</span>
               {asset.kind === "pdf" && pdfDims && (
                 <>
                   <span>·</span>
                   <span className="num" title={lang === "de" ? "Seitenformat" : "Page size"}>{pdfDims.w} × {pdfDims.h} mm</span>
+                </>
+              )}
+              {isVideo && asset.duration > 0 && (
+                <>
+                  <span>·</span>
+                  <span className="num">{Math.floor(asset.duration / 60)}:{String(Math.round(asset.duration) % 60).padStart(2, "0")} min</span>
+                </>
+              )}
+              {asset.kind === "image" && asset.width > 0 && (
+                <>
+                  <span>·</span>
+                  <span className="num" title={lang === "de" ? "Druckgröße bei 300 dpi" : "Print size at 300 dpi"}>{window.assetDimLabel?.(asset, { withPx: false })} @300dpi</span>
                 </>
               )}
               <span>·</span>
@@ -1181,6 +1266,7 @@ function UploadModal({ open, onClose, defaultFolder, area, onUploaded, lang }) {
       status: "pending",
       file: f,
       isPdf: f.type === "application/pdf" || f.name.toLowerCase().endsWith(".pdf"),
+      isVideo: f.type.startsWith("video/") || /\.(mp4|m4v|mov|webm|mkv|avi)$/i.test(f.name),
       // Blob URL for both images and PDFs; images rendered as <img>, PDFs rendered via PDF.js
       previewUrl: URL.createObjectURL(f),
     }));
@@ -1439,7 +1525,7 @@ function UploadModal({ open, onClose, defaultFolder, area, onUploaded, lang }) {
             onDrop={(e) => { e.preventDefault(); setOver(false); addFiles(e.dataTransfer.files); }}
             style={{ cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", padding: files.length > 0 ? "14px 0" : undefined }}
           >
-            <input ref={fileInputRef} type="file" multiple accept="image/*,application/pdf"
+            <input ref={fileInputRef} type="file" multiple accept="image/*,application/pdf,video/*"
               style={{ position: "absolute", width: 0, height: 0, opacity: 0, overflow: "hidden" }}
               onChange={(e) => { addFiles(e.target.files); e.target.value = ""; }} />
             <window.Icon.upload size={files.length > 0 ? 16 : 22} />
@@ -1536,6 +1622,8 @@ function UploadModal({ open, onClose, defaultFolder, area, onUploaded, lang }) {
                       <div style={{ width: 56, height: 56, borderRadius: 4, overflow: "hidden", flexShrink: 0, position: "relative", background: "var(--line-strong)" }}>
                         {f.isPdf
                           ? <window.PdfThumbnail url={f.previewUrl} hue={f.hue} label="PDF" />
+                          : f.isVideo
+                            ? <video src={f.previewUrl} muted preload="metadata" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
                           : f.previewUrl
                             ? <img src={f.previewUrl} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
                             : <window.PH hue={f.hue} ratio={1} label="" />
@@ -1546,7 +1634,7 @@ function UploadModal({ open, onClose, defaultFolder, area, onUploaded, lang }) {
                         <div style={{ fontWeight: 500, fontSize: 13, marginBottom: 2 }} className="clamp-1">{f.name}</div>
                         <div style={{ fontSize: 11, color: "var(--muted)", display: "flex", gap: 10 }}>
                           <span className="num">{f.size} MB</span>
-                          <span>{f.isPdf ? "PDF" : (lang === "de" ? "Bild" : "Image")}</span>
+                          <span>{f.isPdf ? "PDF" : f.isVideo ? "Video" : (lang === "de" ? "Bild" : "Image")}</span>
                           {isPending && uploading && <span style={{ color: "var(--faint)" }}>{lang === "de" ? "Wartend…" : "Waiting…"}</span>}
                           {isUploading && <span style={{ color: "var(--accent)" }}>{lang === "de" ? "Wird hochgeladen…" : "Uploading…"}</span>}
                           {isDone && <span style={{ color: "#22c55e" }}>✓ {lang === "de" ? "Fertig" : "Done"}</span>}
