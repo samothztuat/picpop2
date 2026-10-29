@@ -25,6 +25,8 @@ function AssetDetailModal({ open, asset: assetProp, peerAssets, onNavigate, onCl
   // PDF dimensions — from Firestore fields (set during upload) or null
   const [pdfDims, setPdfDims] = useStateM(null);
   const [confirmDel, setConfirmDel] = useStateM(false);
+  // Resolved original URL for assets stored on OneDrive (no direct storageUrl) — needed for the PDF viewer
+  const [resolvedUrl, setResolvedUrl] = useStateM(null);
   // AI description
   const [aiDesc, setAiDesc] = useStateM(asset?.aiDescription ?? "");
   // Fotografische Attribute
@@ -36,6 +38,7 @@ function AssetDetailModal({ open, asset: assetProp, peerAssets, onNavigate, onCl
     if (!assetProp) return;
     clearTimeout(navTimerRef.current);
     setLocalAsset(null);
+    setResolvedUrl(null);
     setTags(assetProp.tags); setNotes(assetProp.notes || ""); setTitle(assetProp.title);
     setAiDesc(assetProp.aiDescription || "");
     setPhotoAttrs(assetProp.photoAttrs || []);
